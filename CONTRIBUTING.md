@@ -68,16 +68,26 @@ By making a contribution to this project, I certify that:
 
 ## Running the tests
 
+The project venv lives outside the repo at `~/.venvs/splock`. Create it once:
+
 ```bash
-# From the repo root, with your virtualenv active:
+python3 -m venv ~/.venvs/splock
+~/.venvs/splock/bin/pip install pytest jsonschema Pygments python-dotenv
+```
+
+Then activate and run:
+
+```bash
+source ~/.venvs/splock/bin/activate
+# From the repo root:
 python -m pytest tests/ -q
 
 # The host-trace scrub gate:
 bash tests/trace_grep.sh
 ```
 
-If you keep a virtualenv outside the default `./.venv`, point splock at it with
-`SPLOCK_VENV` (see [ADOPTION.md](ADOPTION.md)).
+Set `SPLOCK_VENV=~/.venvs/splock` in your shell profile so the bin/ wrappers
+and hooks activate the right interpreter (see [ADOPTION.md](ADOPTION.md)).
 
 ---
 
