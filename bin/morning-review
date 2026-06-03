@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# bin/morning-review — morning-review queue CLI (implplan §H.impl).
+#
+# POSIX shell wrapper that activates the project venv and dispatches to
+# `python -m bin._morning_review.main`. All subcommands + flags are owned
+# by the Python entry point; this wrapper exists only to centralize venv
+# activation + repo-root resolution.
+#
+# Subcommands (per §H.impl.3 table):
+#   list [--slug X] [--unresolved | --all] [--json]
+#   show <slug> <task_id> [--json]
+#   reactivate <slug> <task_id> [--reason TEXT] [--dry-run]
+#   route-outstanding <slug> <task_id> [--reason TEXT] [--dry-run]
+#   route-marker <slug> <task_id> --prefix P [--reason TEXT] [--trigger SPEC]
+#                                            [--detail PATH] [--dry-run]
+#   abandon <slug> <task_id> --confirm --reason TEXT [--dry-run]
+#   acknowledge <slug>
+#   gc [--older-than N] [--dry-run]
+#   (v1.4 — eval extensions, registered but ship as no-ops here)
+#
+# Internal-prefix subcommands (hidden):
+#   --internal-bootstrap-day <YYYY-MM-DD> --slug <slug>
+#   --internal-mark-deferred <task_id> --marker <marker_id>
+#
+# Global flags: --dry-run, --json (per subcommand surface).
+#
+# Exit codes: closed-enum per §H.impl.3 + §A.impl.3a registry.
+#   0  ok                       7  atomic_write_failed
+#   22 queue_entry_not_found    23 triage_double_close
+#   24 archive_move_failed      31 abandon_args_missing
+#   plus codes propagated from underlying CLIs (bin/update_orchestrator
+#   etc.) preserved verbatim.
+#
+# Hook-log triage seam (T5 — intent_session_auto_register):
+#   `bin/_morning_review/hook_log_triage.py` exposes :func:`categorize`
+#   + :func:`summarize` for bucketing hook-log JSONL rows. The T5
+#   addition introduces an `intent_doctor` bucket so doctor outcomes
+#   (subsystem=intent.doctor) surface distinctly in the daily review
+#   rather than being mixed into a generic "hook errors" bucket.
+#   See `bin._morning_review.hook_log_triage` for the closed-enum
+#   bucket list + routing rules.
+
+set -e
+
+# Resolve repo root from this script's location.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Activate venv if available and not already active (idempotent).
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec python -m bin._morning_review.main "$@"

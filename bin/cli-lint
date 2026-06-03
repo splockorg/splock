@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# bin/cli-lint — catalog + standing-requirements static check.
+#
+# Spec: plan §N.5 + implplan §N.impl.3. POSIX-shell wrapper that
+# activates the project venv and dispatches to `python -m
+# bin._cli_lint.main`.
+#
+# CLI shape:
+#   bin/cli-lint --check                    # Validate every catalog CLI
+#   bin/cli-lint --check --cli <name>       # Validate single CLI
+#   bin/cli-lint --check --changed-only     # Validate only CLIs changed in HEAD
+#   bin/cli-lint --check --all              # Explicit alias for "every CLI"
+#   bin/cli-lint --list-rules               # Print the 6 standing rules
+#
+# Closed-enum exit codes (per implplan §A.impl.3a + §N.impl.9 #2):
+#   0  = all rules pass
+#   1  = usage error (argparse violation)
+#   2  = driver crash / catalog not found
+#   38 = cli_lint_violation (rule discriminated in structured stderr)
+#
+# Structured stderr on violation:
+#   {"error":"cli_lint_violation","rule":"REQ_X_<name>","cli":"bin/<name>",
+#    "line":<N>,"detail":"<text>"}
+#
+# Same scope-disambiguation discipline as bin/hook-lint: cli-lint's $? is
+# consumed only by pre-commit / CI gates, never by chain callers.
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec python -m bin._cli_lint.main "$@"

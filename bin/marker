@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# bin/marker — scheduled-markers CLI wrapper (implplan §K.impl).
+#
+# POSIX shell wrapper that activates the project venv and dispatches to
+# `python -m bin._marker.main`. All subcommands + flags are owned by the
+# Python entry point; this wrapper exists only to centralize venv
+# activation + repo-root resolution.
+#
+# Subcommands:
+#   create <PREFIX> "<title>" --trigger <spec> [opts]
+#   close <ID> --resolution "<text>" [opts]
+#   list [--prefix P] [--source-plan slug] [--active|--closed|--all]
+#   show <ID> [--detail-only]
+#   validate [--all|--changed-only] [--strict-edit-block]
+#   register-prefix <NEW_PREFIX> --domain "<text>" --owner "<text>" ...
+#
+# Global flags: --dry-run, --allow-na, --json (per subcommand surface).
+#
+# Exit codes: closed-enum per §K.impl.3 table. See `bin/marker <sub> --help`.
+set -e
+
+# Resolve repo root from this script's location: bin/marker → REPO_ROOT
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Venv activation: try project venv path; fall back to environment-PATH python.
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec python -m bin._marker.main "$@"

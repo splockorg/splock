@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/splockorg/splock/blob/main/schemas/orchestrator_v1.schema.json",
+  "title": "Orchestrator plan substrate v1",
+  "description": "Canonical schema for <slug>_orchestrator.json per implplan §B.impl.3.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "slug", "phase", "plan_ref", "tasks"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$",
+      "description": "plan slug; alphanumeric start, then alphanumeric + underscore + hyphen. Same pattern as plan_v1.schema.json + orchestrator_log_v1.schema.json Slug def per §B.impl.3 line 1062 (post Phase 1 integration review POST-MAJOR-1 fix — was kebab-only; widened to allow underscores matching real repo slugs like brand_handoff_gate, dev_request_queue)."
+    },
+    "phase": {
+      "type": "string",
+      "enum": ["Phase 3"]
+    },
+    "plan_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Relative pointer to <slug>_plan.json (typically '<slug>_plan.json')."
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "file_paths_touched",
+          "tests_enabled",
+          "agent_assignment"
+        ],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "pattern": "^T[A-Za-z0-9_-]+$"},
+          "title": {"type": "string", "minLength": 1},
+          "file_paths_touched": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "tests_enabled": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "agent_assignment": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["subagent", "model"],
+            "properties": {
+              "subagent": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Closed enum source is .claude/agents/_roster.json per §D.impl; schema does not duplicate the enum to avoid drift."
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Either the literal 'inherit' or a model-id literal."
+              }
+            }
+          },
+          "ddl_statements": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "call_sites": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "test_plan": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["test_id", "asserts", "fixture"],
+              "properties": {
+                "test_id": {"type": "string", "minLength": 1},
+                "asserts": {"type": "string"},
+                "fixture": {"type": "string"}
+              }
+            }
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        }
+      }
+    },
+    "review_agent_prompt_pointer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "junctions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "after_task", "kind"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "after_task": {"type": "string", "minLength": 1},
+          "kind": {
+            "type": "string",
+            "enum": ["phase_boundary", "review_gate", "test_gate"]
+          }
+        }
+      }
+    }
+  }
+}

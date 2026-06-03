@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# POSIX shell wrapper for `bin/git-merge-jsonl` (Python under
+# bin/_git_merge_jsonl/). Per implplan §C.impl.9.
+#
+# Git invokes this driver with: bin/git-merge-jsonl %O %A %B %L
+
+set -eu
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+cd "${REPO_ROOT}"
+
+VENV_PY="${SPLOCK_VENV:-.venv}/bin/python"
+if [ -x "${VENV_PY}" ]; then
+    PY="${VENV_PY}"
+else
+    PY="$(command -v python3 || command -v python)"
+fi
+
+exec "${PY}" -m bin._git_merge_jsonl.main "$@"

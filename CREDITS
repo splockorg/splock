@@ -1,0 +1,95 @@
+# CREDITS — prior art & influences
+
+splock is an independent work, written from scratch and licensed under
+Apache-2.0. It nonetheless stands on a body of public ideas, tools, and
+research. The list below names every external influence we are aware of,
+links to it, and describes — in our own words — what we took from it. Where a
+source carries its own license, that license is named so adopters can reason
+about their obligations.
+
+We deliberately wrote our documentation and prose from first principles rather
+than adapting text from any of these sources, so that splock carries no
+attribution or copyleft obligation onto its own readers. The acknowledgements
+here are offered out of intellectual honesty, not legal necessity.
+
+---
+
+## Tooling & platform
+
+### Claude Code (Anthropic)
+- Reference: Anthropic Claude Code documentation —
+  https://docs.anthropic.com/en/docs/claude-code
+- splock is a Claude Code plugin. It targets Claude Code's native extension
+  surfaces — plugins, slash commands, subagents, skills, and the lifecycle
+  hook system (PreToolUse, PostToolUse, SessionStart, Stop, SubagentStop,
+  UserPromptSubmit, SessionEnd) — and assumes the Claude Code CLI as its
+  runtime host. The hook contract and the plugin manifest format are
+  Anthropic's; splock implements against them.
+
+### Spec Kit (GitHub) — MIT License
+- Reference: https://github.com/github/spec-kit
+- Influence: the idea that an agent should work from an explicit, written
+  specification — a structured plan that precedes implementation — rather than
+  improvising from a one-line prompt. splock's plan -> implement -> verify
+  lifecycle, and its insistence that a plan be a durable, reviewable artifact,
+  are in the same spirit. We did not copy Spec Kit's templates, commands, or
+  code; our two-call planner, schema set, and orchestrator format are our own.
+
+---
+
+## Patterns & methodology
+
+### Agent design patterns
+- Reference: AgentPatterns.ai — https://www.agentpatterns.ai
+- Influence: general vocabulary and framing for recurring multi-agent and
+  agent-workflow patterns (planner/executor separation, verification loops,
+  role specialization). splock's subagent roster (planner, coder, reviewer,
+  verifier, recon, research, qa, qna) and its completion-gate loop are an
+  independent realization of ideas in this space rather than a port of any
+  specific pattern catalog.
+
+---
+
+## Security research
+
+splock's deterministic enforcement spine — sealed-state hooks, a path-intent
+and collision registry, suppression-pattern blocking, and a separately-pinned
+verifier model that an executor cannot talk its way past — is a direct response
+to the threat model articulated by the following work. We treat an LLM agent as
+an untrusted component whose instructions can be hijacked, and we put the
+safety-critical decisions in deterministic code outside the model's control.
+
+### OWASP Top 10 for LLM Applications — CC BY-SA 4.0
+- Reference: https://owasp.org/www-project-top-10-for-large-language-model-applications/
+- License: Creative Commons Attribution-ShareAlike 4.0 International.
+- Influence: the catalog of LLM-application risk classes — prompt injection,
+  insecure output handling, excessive agency, and overreliance in particular —
+  informed which failure modes splock's hooks are designed to make
+  structurally impossible rather than merely discouraged in a prompt. No OWASP
+  text is reproduced here; this is a named acknowledgement of the threat
+  taxonomy, written in our own words, and therefore does not propagate the
+  ShareAlike obligation to splock's own documentation.
+
+### Greshake et al. (2023) — indirect prompt injection
+- Reference: Kai Greshake, Sahar Abdelnabi, Shailesh Mishra, Christoph Endres,
+  Thorsten Holz, Mario Fritz, "Not what you've signed up for: Compromising
+  Real-World LLM-Integrated Applications with Indirect Prompt Injection,"
+  arXiv:2302.12173 (2023). https://arxiv.org/abs/2302.12173
+- Influence: the demonstration that content an agent merely *reads* (files,
+  tool output, retrieved text) can carry adversarial instructions is the core
+  reason splock never trusts in-band prose to enforce a boundary. Enforcement
+  always lives in a hook or a CLI exit code, never in skill or agent prose that
+  a hostile payload could overwrite or contradict. This is a citation of the
+  research finding, in our own words; no figures or text from the paper are
+  reproduced.
+
+---
+
+## A note on provenance
+
+splock was extracted into a standalone, repo-agnostic plugin from a private
+in-house automation framework. During extraction every host-specific identity,
+path, organization name, and domain token was scrubbed from the tree, and a
+dedicated trace-grep gate (`tests/trace_grep.sh`) enforces that the published
+artifact carries none of that provenance. If you find a stray host reference,
+please open an issue — it is a bug in the scrub, not an intended attribution.

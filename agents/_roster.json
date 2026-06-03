@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "subagents": [
+    "planner",
+    "recon",
+    "qa",
+    "qna",
+    "research",
+    "coder",
+    "reviewer",
+    "verifier"
+  ],
+  "_comment": "Source-of-truth enum for orchestrator_v1.schema.json agent_assignment.subagent. Adding/removing roles requires schema-version bump per implplan §B.impl.3 + §D.impl.4. Hand-authored alongside the eight .claude/agents/*.md definitions per plan §D.8 cross-cutting rule #4 (no LLM emission). v2 (2026-05-23): added 'qna' for the question-and-answer subagent (operator-supplied question → answer + supporting evidence; distinct from 'qa' which is the adversarial-review subagent per feedback_qa_vs_qna_terminology.md)."
+}

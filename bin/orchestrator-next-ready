@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# bin/orchestrator-next-ready — auto-pick next-ready task CLI (code_next_ready_pick T1).
+#
+# Per docs/plans/code_next_ready_pick/code_next_ready_pick_plan.md. Thin
+# POSIX wrapper around `python -m bin._orchestrator_query.main`.
+# Activates the project venv if available so operator invocations from
+# outside PyCharm get the right interpreter.
+#
+# Usage:
+#   bin/orchestrator-next-ready <slug>             # prints first-ready id, exit 0
+#   bin/orchestrator-next-ready <slug> --json      # ReadySetReport JSON to stdout
+#   bin/orchestrator-next-ready <slug> --verbose   # per-task breakdown to stderr
+#
+# Exit codes (closed-enum per bin/_orchestrator_query/exit_codes.py):
+#   0  ok / first-ready printed
+#   2  usage
+#   10 slug not found (docs/plans/<slug>/ missing)
+#   11 orchestrator JSON missing
+#   12 orchestrator JSON malformed
+#   13 _state.json shape invalid (neither dict nor array)
+#   20 verdict=all_blocked
+#   21 verdict=all_wip
+#   22 verdict=mixed_no_ready
+#   23 verdict=all_done (plan complete)
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec python -m bin._orchestrator_query.main "$@"

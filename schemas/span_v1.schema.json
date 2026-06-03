@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/splockorg/splock/blob/main/schemas/span_v1.schema.json",
+  "title": "OpenInference-shape span row (derived)",
+  "description": "Schema for a single JSONL row in docs/plans/<slug>/_spans.jsonl. Per splock implplan §J.impl.3. v2.7 ships derived only — `bin/render_spans` materializes spans from _orchestrator_log.jsonl + hook_log.jsonl + _chain_sessions.json. Native per-emitter span writes deferred to marker NSE.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "trace_id",
+    "span_id",
+    "parent_span_id",
+    "span_kind",
+    "name",
+    "start_ts",
+    "status",
+    "attributes",
+    "events"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "trace_id": {"type": "string", "minLength": 1},
+    "span_id": {"type": "string", "pattern": "^span_[0-9a-f]{16}$"},
+    "parent_span_id": {"type": "string", "minLength": 1},
+    "span_kind": {
+      "type": "string",
+      "enum": ["chain", "agent", "tool", "llm", "evaluator", "guardrail", "hook"]
+    },
+    "name": {"type": "string", "minLength": 1},
+    "start_ts": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"},
+    "end_ts": {
+      "oneOf": [
+        {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"},
+        {"type": "null"}
+      ]
+    },
+    "status": {"type": "string", "enum": ["ok", "error", "unset"]},
+    "attributes": {"type": "object"},
+    "events": {"type": "array"}
+  }
+}

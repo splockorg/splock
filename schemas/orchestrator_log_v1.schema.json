@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/splockorg/splock/blob/main/schemas/orchestrator_log_v1.schema.json",
+  "title": "Per-event orchestrator transition log row",
+  "description": "Schema for a single JSONL row in docs/plans/<slug>/_orchestrator_log.jsonl. Per implplan §C.impl.3. Schema-version trajectory: 1 (v1.0-v1.2), 2 (v1.3-revised), 3 (v1.4-revised), 4 (v1.5-audit-response), 5 (§G.impl ship — adds bin/hook-log + bin/log + bin/security-dispatch + bin/hook-lint + 2 sub-emitters to KNOWN_WRITERS). All five versions accepted by SUPPORTED_VERSIONS_LOG; closed-enum surfaces are the same shape across versions. Forward-compat per implplan §B.impl.3a: unknown leading-underscore fields are tolerated.",
+  "oneOf": [
+    {"$ref": "#/$defs/StandardRow"},
+    {"$ref": "#/$defs/RecoveryRow"}
+  ],
+  "$defs": {
+    "SevenStatus": {
+      "type": "string",
+      "enum": ["ready", "wip", "done", "deferred", "blocked", "cancelled", "unknown"]
+    },
+    "IsoTimestampZ": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "SessionId": {
+      "type": "string",
+      "pattern": "^sess_[0-9a-f]{8}$"
+    },
+    "Slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$"
+    },
+    "TaskId": {
+      "oneOf": [
+        {"type": "string", "pattern": "^T[A-Za-z0-9_-]+$"},
+        {"type": "null"}
+      ]
+    },
+    "ModeAtTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overnight", "guardrail"],
+      "properties": {
+        "overnight": {"type": "boolean"},
+        "guardrail": {"type": "boolean"}
+      }
+    },
+    "OverrideInEffect": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "operator_override": {"type": ["boolean", "null"]},
+            "operator_override_state": {"type": ["boolean", "null"]},
+            "driver_override": {"type": ["boolean", "null"]}
+          }
+        }
+      ]
+    },
+    "Transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": {"$ref": "#/$defs/SevenStatus"},
+        "to": {"$ref": "#/$defs/SevenStatus"}
+      }
+    },
+    "EmittedBy": {
+      "type": "string",
+      "description": "Validation against KNOWN_WRITERS happens at write time in bin/_jsonl_log/writer.py; schema-level constraint is non-empty string only because re-validating the closed enum in the schema would require regenerating this file each time KNOWN_WRITERS gains an entry. The implplan §C.impl.6 contract is the source of truth.",
+      "minLength": 1
+    },
+    "StandardRow": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "ts",
+        "session_id",
+        "emitted_by",
+        "plan_slug",
+        "task_id",
+        "transition",
+        "mode_at_transition",
+        "reason"
+      ],
+      "not": {
+        "properties": {"session_id": {"const": "_recovery"}}
+      },
+      "properties": {
+        "schema_version": {"type": "integer", "minimum": 1, "maximum": 6},
+        "ts": {"$ref": "#/$defs/IsoTimestampZ"},
+        "session_id": {"$ref": "#/$defs/SessionId"},
+        "emitted_by": {"$ref": "#/$defs/EmittedBy"},
+        "plan_slug": {"$ref": "#/$defs/Slug"},
+        "chain_id": {"type": ["string", "null"]},
+        "task_id": {"$ref": "#/$defs/TaskId"},
+        "transition": {"$ref": "#/$defs/Transition"},
+        "pointer": {"type": ["string", "null"]},
+        "retry_count": {"type": ["integer", "null"], "minimum": 0},
+        "mode_at_transition": {"$ref": "#/$defs/ModeAtTransition"},
+        "override_in_effect": {"$ref": "#/$defs/OverrideInEffect"},
+        "reason": {"type": "string"},
+        "verifier_verdict_ref": {"type": ["string", "null"]},
+        "writer_pid": {"type": ["integer", "null"]},
+        "writer_host": {"type": ["string", "null"]},
+        "event_type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional payload-level discriminator for sub-classifying transition rows. Recognized values include: overnight_rollback_override_used, iteration_overflow_sentinel, develop_plan_status_mapped, develop_plan_rollback_refused, state_md_rendered (orch_status_render T4), state_md_render_failed (orch_status_render T4), chain_paused (CCOR.1 T-5), chain_resumed (CCOR.1 T-6), chain_paused_lock_stale_cleared (CCOR.1 T-7), pause_inject_consumed (CCOR.1 T-7). The list is illustrative, not enforced; new event_types may be added by writers without schema bump. Free-form string per the additive philosophy documented at bin/_update_orchestrator/log_emit.py lines 90-98."
+        }
+      }
+    },
+    "RecoveryRow": {
+      "description": "Schema branch for `_corrupt_truncated` audit rows emitted by _validate_or_truncate_last_line. Per implplan §C.impl.8: session_id is fixed `_recovery`; mode_at_transition allows nulls only on this branch; transition.from/to are both `unknown`; carries `_corrupt_bytes_hex` + `_truncated_byte_count` additive fields.",
+      "type": "object",
+      "required": [
+        "schema_version",
+        "ts",
+        "session_id",
+        "emitted_by",
+        "plan_slug",
+        "task_id",
+        "transition",
+        "mode_at_transition",
+        "reason"
+      ],
+      "properties": {
+        "schema_version": {"type": "integer", "minimum": 1, "maximum": 6},
+        "ts": {"$ref": "#/$defs/IsoTimestampZ"},
+        "session_id": {"const": "_recovery"},
+        "emitted_by": {"const": "_validate_or_truncate_last_line"},
+        "plan_slug": {"$ref": "#/$defs/Slug"},
+        "chain_id": {"type": ["string", "null"]},
+        "task_id": {"type": "null"},
+        "transition": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from", "to"],
+          "properties": {
+            "from": {"const": "unknown"},
+            "to": {"const": "unknown"}
+          }
+        },
+        "pointer": {"type": ["string", "null"]},
+        "retry_count": {"type": "null"},
+        "mode_at_transition": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["overnight", "guardrail"],
+          "properties": {
+            "overnight": {"type": ["boolean", "null"]},
+            "guardrail": {"type": ["boolean", "null"]}
+          }
+        },
+        "override_in_effect": {"type": ["object", "null"]},
+        "reason": {"type": "string"},
+        "verifier_verdict_ref": {"type": ["string", "null"]},
+        "writer_pid": {"type": ["integer", "null"]},
+        "writer_host": {"type": ["string", "null"]},
+        "_corrupt_bytes_hex": {"type": "string", "pattern": "^([0-9a-fA-F]{2})*$"},
+        "_truncated_byte_count": {"type": "integer", "minimum": 0},
+        "event_type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional payload-level discriminator (same shape as StandardRow.event_type). Recognized values mirror the StandardRow.event_type list, including the CCOR.1 additions: chain_paused, chain_resumed, chain_paused_lock_stale_cleared, pause_inject_consumed. Tolerated on RecoveryRow for forward-compat although recovery rows are not currently expected to carry this field."
+        }
+      }
+    }
+  }
+}

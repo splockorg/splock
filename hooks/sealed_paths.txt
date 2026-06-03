@@ -1,0 +1,79 @@
+# sealed_paths.txt — canonical closed-list inventory of sealed paths.
+#
+# Consumed by:
+#   - hooks/chain-sealed-state-delete-block.sh (PreToolUse hook)
+#   - hooks/sealed-paths.sh (user-home + content-check umbrella)
+#   - bin/_chain_overnight/pre_stage.py (driver-layer dual-altitude
+#     safety net)
+#   - bin/sealed-paths --list (utility; deferred)
+#
+# Format: one glob pattern per line. `#` comments and blank lines
+# ignored. `~/` prefixes resolved to $HOME at load time. Paths are
+# repo-relative (the adopter's project root) unless `~/`-anchored.
+
+# --- splock sealed-state per slug (framework seals — portable) ---
+docs/plans/*/_state.json
+docs/plans/*/_chain_sessions.json
+docs/plans/*/_chain_running.lock
+docs/plans/*/_chain_paused.lock
+docs/plans/*/_operator_inject.md
+docs/plans/*/_orchestrator_log.jsonl
+docs/plans/*/_orchestrator.md
+docs/plans/*/_orchestrator_log.md
+docs/plans/*/*_plan.json
+docs/plans/*/*_plan.md
+docs/plans/*/*_orchestrator.json
+docs/plans/*/*_orchestrator.md
+docs/plans/*/_test_expectations.json
+docs/plans/*/_completion_summary_*.md
+docs/plans/*/_baseline/**
+docs/plans/*/_regression_cases/**
+docs/plans/*/morning-review/**
+
+# --- agent-session intent registry ---
+# The intent registry's local journal (append-only via `bin/intent`).
+# State is relocated under the plugin data-root (${CLAUDE_PLUGIN_DATA},
+# default ${CLAUDE_PROJECT_DIR}/.plugin-data): the SQLite db
+# (intent_local.sqlite3), the settings overlay (intent_settings.json),
+# and the JSONL mirror all co-locate there.
+.plugin-data/intent_local.sqlite3
+.plugin-data/intent_local.jsonl
+.plugin-data/intent_settings.json
+.plugin-data/**
+# Repo-relative JSONL mirror (writer's current layout — sealed for the
+# transition window until the data-root rethread completes).
+docs/intent/intent_local.jsonl
+
+# --- deferred-work routing ---
+# bin/route_issue and bin/lazy-dump-check own append-only writes to these
+# files; PreToolUse hooks (lazy-dump-cap.sh + escalation-trigger-precommit.sh)
+# enforce at the Edit/Write boundary; sealed-paths entries add the
+# driver-layer dual-altitude defense via bin/_chain_overnight/pre_stage.py.
+docs/outstanding_issues.md
+docs/plans/*/morning-review/escalation_*.md
+
+# --- evaluation + trace artifacts ---
+# bin/_eval_common/score_writer + failure_capture + span_writer own append-only
+# writes to these targets; sealed-paths entries add the driver-layer
+# dual-altitude defense (chain-sealed-state-delete-block hook + pre_stage.py).
+docs/plans/*/_spans.jsonl
+docs/plans/*/_scores.jsonl
+docs/plans/*/_failures/**
+
+# --- Project secrets / config (generic-recommended adopter entries) ---
+.env
+.env.*
+*.env
+.claude/agents/**
+.claude/hooks/**
+.claude/commands/**
+.git/**
+
+# --- User-home credential paths (generic-recommended adopter entries) ---
+~/.aws/**
+~/.ssh/**
+~/.config/*/credentials
+~/.docker/config.json
+~/.kube/config
+~/.netrc
+~/.git-credentials

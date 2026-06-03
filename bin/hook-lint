@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# bin/hook-lint — validation gate for `.claude/hooks/*.sh` scripts.
+#
+# Spec: plan §G.7.5 + implplan §G.impl.12. POSIX-shell wrapper that
+# activates the project venv and dispatches to `python -m
+# bin._hooks.hook_lint`.
+#
+# CLI shape:
+#   bin/hook-lint --check                   # Validate every hook
+#   bin/hook-lint --check --hook <name>     # Validate single hook
+#   bin/hook-lint --list-rules              # Print rule set
+#
+# Closed-enum exit codes (per §G.impl.12, scoped to hook-lint):
+#   0 = all rules pass
+#   1 = CLI usage error
+#   10 = R-JSON-SHAPE violation
+#   11 = R-EXIT-ZERO-ON-DENY violation
+#   12 = R-STOP-HOOK-ACTIVE violation
+#   13 = R-NAMING-KEBAB violation
+#   14 = R-HOOK-LOG-CALL violation
+#   15 = R-POSTTOOL-NO-DENY violation
+#   16 = R-PACKAGE-SAFETY-CITATION violation
+#
+# Numerical-overlap note: code 10 also appears in the chain-orchestrated
+# shared exit-code registry (A.impl.3a) as `phase_boundary_halt`.
+# Scope-disambiguation is by calling binary — bin/hook-lint's $? is
+# consumed only by pre-commit / CI gates, never by chain callers.
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec python -m bin._hooks.hook_lint "$@"

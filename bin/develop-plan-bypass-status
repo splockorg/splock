@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# bin/develop-plan-bypass-status — read-only telemetry CLI (implplan §E.impl.6).
+#
+# Surfaces the five E.6 fields by scanning every
+# `docs/plans/<slug>/_orchestrator_log.jsonl` + `_state.json`. No durable
+# cache; recomputed on every invocation.
+#
+# Subcommand-less invocation (default):
+#   bin/develop-plan-bypass-status [--json] [--verbose] [--since <ISO-8601>]
+#
+# Exit codes: 0 success / 1 usage. No refusal families.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec python -m bin._update_orchestrator.bypass_status "$@"

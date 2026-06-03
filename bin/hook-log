@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# bin/hook-log — structured-log emitter for `.claude/hooks/*` scripts.
+#
+# Per implplan §G.impl.11. POSIX-shell wrapper that activates the project
+# venv and dispatches to `python -m bin._hooks.main`. All argument
+# handling + exit codes are owned by the Python entry point.
+#
+# CLI shape:
+#   bin/hook-log <hook-name> <action> "<message>"
+#
+# Action enum (closed): ok / blocked / flagged / error
+#
+# Output: appends one JSON line to
+#   ~/.claude/logs/hooks-<YYYY-MM-DD>.jsonl
+# Per-user, per-day rotation; sensitive hook telemetry kept out of git.
+#
+# Exit codes:
+#   0 = accepted (row appended)
+#   1 = usage error (wrong arg count)
+#   4 = rejected (action not in enum, name empty)
+#
+# Consumed by: morning-review (surfaces blocks/errors), `bin/hook-lint
+# --check` (verifies every hook calls it), §J.impl eval/trace
+# (block-rate score signal).
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec python -m bin._hooks.main "$@"

@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/env_inventory_v1.schema.json",
+  "title": "Env-var inventory registry schema (v1)",
+  "description": "Per splock implplan §I.impl.2 + §I.impl.3. SOLE source of truth for the EnvVarSpec dict shape. Consumed by bin/_env_inventory/registry.py at import time. Forward-compat per §B.impl.6: unknown schema_version refused with exit code 5 + structured stderr {\"error\":\"unsupported_schema_version\",\"kind\":\"env_inventory\",\"seen\":N,\"supported\":[1]}.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "entries"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [1],
+      "description": "Forward-compat sentinel. Currently only v1 is supported."
+    },
+    "entries": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/EnvVarSpec"},
+      "description": "Map from env-var name (UPPER_SNAKE_CASE) to its EnvVarSpec entry."
+    }
+  },
+  "$defs": {
+    "EnvVarSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "default",
+        "propagation_class",
+        "owner_section",
+        "consumed_by",
+        "plan_citation"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["string", "int", "float", "numeric"],
+          "description": "Logical type. 'numeric' accepts int or float (e.g., USD amounts)."
+        },
+        "default": {
+          "description": "Default value when unset. May be null (=> 'unset' semantics)."
+        },
+        "min": {
+          "description": "Lower bound (inclusive) for numeric vars. Absent for string-type."
+        },
+        "max": {
+          "description": "Upper bound (inclusive) for numeric vars. Absent for string-type, or null for unbounded."
+        },
+        "valid_values": {
+          "type": "array",
+          "items": {"type": ["string", "integer", "null"]},
+          "description": "Closed enum for string vars (optional; absent => free string with optional regex)."
+        },
+        "regex": {
+          "type": "string",
+          "description": "Validation regex for string-type vars (e.g., MODEL_PIN_RE)."
+        },
+        "propagation_class": {
+          "type": "string",
+          "enum": [
+            "operator-set-runtime-tunable",
+            "operator-set-per-action",
+            "operator-set-mode-flag",
+            "driver-set-chain-context",
+            "operator-set-model-pin",
+            "operator-set-debug-toggle",
+            "inherited-from-broader-system"
+          ],
+          "description": "Closed enum per §I.impl.4. Each class carries a per-class read-discipline contract."
+        },
+        "owner_section": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Owning §X.impl section (e.g., 'A.impl', 'G.impl') or 'broader system' / 'repo-wide'."
+        },
+        "consumed_by": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Sections / hook scripts / CLIs that read this var at runtime."
+        },
+        "plan_citation": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Cross-link to plan / implplan section for traceability."
+        }
+      }
+    }
+  }
+}

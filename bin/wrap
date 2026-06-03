@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# bin/wrap — operator-directive wrap helper for main-agent-mediated slash commands.
+#
+# Per std_command_operator_extensions task TF. Thin POSIX wrapper around
+# `bin/_wrap/main.py`. Activates the project venv if available so slash-command
+# MD invocations from outside PyCharm have the right interpreter.
+#
+# Usage:
+#   bin/wrap --kind operator-directive --content "focus on the gate logic"
+#   echo "focus on the gate logic" | bin/wrap --kind operator-directive
+#
+# Exit codes:
+#   0  = success (wrapped content emitted to stdout)
+#   1  = usage error (unknown --kind, missing --kind, size cap exceeded)
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Activate venv if present and not already active (idempotent).
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec python -m bin._wrap.main "$@"

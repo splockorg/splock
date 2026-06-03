@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# bin/eval-trend — calibration trend surfacer for operator review (§J.impl.10).
+#
+# ANCHOR (operator-as-terminator, orchestrator §4a.2): this CLI surfaces
+# threshold breaches as morning-review rows for the operator. There is
+# no meta-scorer above the operator's ground-truth labels.
+#
+# Exit codes: 0 ok / 1 usage / 5 unsupported-schema / 7 atomic-write-failed.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec python -m bin._eval_trend.main "$@"

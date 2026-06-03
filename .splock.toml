@@ -1,0 +1,64 @@
+# .splock.toml — splock adopter configuration.
+#
+# Single per-project config surface for an adopting repo. Every key is
+# OPTIONAL: splock ships working defaults and reads env-var overrides
+# first, so an empty (or absent) .splock.toml runs the framework with
+# its built-in defaults. Copy this file to your project root and edit.
+#
+# Precedence (highest first): process env var > .splock.toml > built-in
+# default literal at the call site. See docs/ for the env-var names that
+# shadow each key.
+
+[project]
+# Logical project name. Used in log lines, the default plan-slug home,
+# and the marketplace/plugin identity surfaces.
+name = "splock"
+
+# Optional explicit virtualenv path. When unset, the bin/ wrappers and
+# hooks honor an already-active $VIRTUAL_ENV, then $SPLOCK_VENV, then
+# auto-detect ./.venv, falling back to a bare `python3` on PATH.
+# venv_path = ".venv"
+
+[intent]
+# Agent-session intent / collision registry backend.
+# One of: "sqlite" (default, zero-dependency), "jsonl", "mysql".
+# Env override: SPLOCK_INTENT_BACKEND
+backend = "sqlite"
+
+# Collision halt behavior when two sessions claim overlapping paths.
+# One of: "halt" (default), "warn", "log_only".
+# Env override: SPLOCK_INTENT_COLLISION_HALT_ACTION
+collision_halt_action = "halt"
+
+# MySQL connection — ONLY read when backend = "mysql". Leave commented
+# for the default SQLite backend. Secrets belong in .env, not here.
+# [intent.mysql]
+# host = "localhost"
+# port = 3306
+# database = "splock"
+
+[models]
+# Anthropic model pins — documented env-tunable defaults. These are
+# plain defaults, NOT abstracted behind a provider interface.
+#
+# planner  — env override: OVERNIGHT_CHAIN_PLANNER_MODEL
+# reviewer — env override: OVERNIGHT_SONNET_REVIEW_MODEL
+# coder    — env override: OVERNIGHT_OPUS_CODER_MODEL
+planner_model = "claude-opus-4-8"
+reviewer_model = "sonnet"
+coder_model = "opus"
+
+# NOTE: the verifier model is a REQUIRED pin enforced in the verifier
+# agent's frontmatter (agents/verifier.md: model: claude-haiku-4-5-20251001).
+# It is deliberately NOT an adopter-tunable knob — the Ralph completion
+# gate's determinism depends on the pinned dated Haiku. Do not override it.
+
+[templating]
+# domain_example_placeholders — real templating knob. A mapping of
+# placeholder token -> adopter-supplied example value, substituted into
+# generated prompts/docs so the framework's example prose reads in the
+# adopter's own domain instead of a generic one. Keys are arbitrary
+# placeholder names; values are the adopter's concrete examples.
+[templating.domain_example_placeholders]
+# example_entity = "widget"
+# example_pipeline_stage = "ingest"

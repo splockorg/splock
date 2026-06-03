@@ -1,0 +1,47 @@
+# --- Python build / cache artifacts ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Test / tooling caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# --- Virtualenvs ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Runtime plugin state (CLAUDE_PLUGIN_DATA fallback dir) ---
+# The framework writes mutable state (intent SQLite db, JSONL mirror,
+# sealed local state) under .plugin-data/ when CLAUDE_PLUGIN_DATA is
+# unset. Keep the directory tracked via its .gitkeep but never commit
+# the live state files.
+.plugin-data/*
+!.plugin-data/.gitkeep
+
+# --- Local secrets / machine-specific config (never commit) ---
+.env
+.env.*
+!.env.example
+settings.local.json
+.claude/settings.local.json
+
+# --- Editor / OS noise ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

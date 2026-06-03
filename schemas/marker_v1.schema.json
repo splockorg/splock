@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/marker_v1.schema.json",
+  "title": "Scheduled marker — list.md row schema (v1)",
+  "description": "Per splock implplan §K.impl.4. SOLE source of truth for the 13-field row contract. Consumed by bin/_marker/parser.py + bin/_marker/create.py + bin/_marker/validate.py. v2.7 ships v1; future bumps via marker_v2.schema.json + migration script.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "added_date",
+    "target",
+    "source_plan",
+    "module",
+    "data_needed",
+    "detail_file",
+    "context",
+    "status",
+    "emitted_by"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Z]{3,5}\\.[1-9][0-9]*$",
+      "description": "Prefix + sequence (e.g., INV.3, ANC.2, DRIFT.1). Prefix is 3–5 letter caps; sequence is integer ≥ 1. Prefix registered in prefix_registry.md."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "One-line summary; no trailing '?' or '.'. Imperative shape preferred. Title-question / title-speculative refusals enforced at create-time, not at schema level."
+    },
+    "added_date": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "description": "ISO-8601 date; auto-stamped by bin/marker create."
+    },
+    "target": {
+      "type": "string",
+      "enum": ["closure_trigger", "date", "condition"],
+      "description": "Trigger family. closure_trigger = edit-triggered (requires edit-block per §K.impl.6); date = time-triggered; condition = state-triggered."
+    },
+    "source_plan": {
+      "type": ["string", "null"],
+      "pattern": "^([a-z0-9][a-z0-9_-]*|null)$",
+      "description": "Plan slug or literal 'null' string for cross-cutting markers. Pattern aligned with §B plan_v1.schema.json + §C orchestrator_log_v1.schema.json Slug def per §K mid-section review K-02 — allows alphanumeric-start with underscores AND hyphens (e.g., brand_handoff_gate, pipeline-ops-console, self-healing-pipeline)."
+    },
+    "module": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Affected module; path prefix or named subsystem (non-empty)."
+    },
+    "data_needed": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What evidence/state must exist before closure. 'n/a' is permitted only via --allow-na operator flag (R-DATA-NA-UNAUTHORIZED enforced at create-time)."
+    },
+    "detail_file": {
+      "type": "string",
+      "pattern": "^docs/plans/scheduled_markers/[a-z0-9_]+\\.md$",
+      "description": "Relative path under docs/plans/scheduled_markers/. Lowercase + underscores per prefix_registry.md rule 5. Must exist after create writes it; validate refuses with code 12 if missing."
+    },
+    "context": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One-paragraph human-friendly note: why deferred, who cares, dependencies."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "closed"],
+      "description": "CLI-managed. Set to 'active' by create; flipped to 'closed' by close."
+    },
+    "closed_date": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "description": "ISO-8601 date; auto-stamped by bin/marker close. Required when status=closed; absent when status=active."
+    },
+    "closure_resolution": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Operator-supplied via --resolution flag; non-empty. Required when status=closed; absent when status=active."
+    },
+    "emitted_by": {
+      "type": "string",
+      "enum": [
+        "bin/marker",
+        "bin/morning-review:route-marker",
+        "bin/route_issue:route-marker",
+        "agent"
+      ],
+      "description": "Closed enum per §K.impl.3. Stored IN the marker entry to record who created it. 'agent' is the reserved bare value (with concrete agent id appended via 'agent:<id>' pattern; v2.7 ships bare 'agent' and substring-match support deferred). NOTE: this is DISTINCT from the §C orchestrator-log-row emitted_by (which is bin/marker:create / :close etc per KNOWN_WRITERS)."
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "closed"}}},
+      "then": {"required": ["closed_date", "closure_resolution"]}
+    },
+    {
+      "if": {"properties": {"status": {"const": "active"}}},
+      "then": {"not": {"required": ["closed_date"]}}
+    }
+  ]
+}

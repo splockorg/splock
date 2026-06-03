@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# bin/eval-gate — replay+compare gate for system-mod commits (§J.impl.9).
+#
+# Wrapper for `python -m bin._eval_gate.main`. Two dispatch branches:
+#   * Interactive operator commit (STD_CHAIN_ID unset) — strict mode;
+#     exit 32 refuses commit on regression. EVAL_GATE_OVERRIDE=1 permits
+#     commit with loud-log.
+#   * Chain-driver commit (STD_CHAIN_ID set) — report-only; always
+#     permits commit; emits needs-review row to morning-review.
+#
+# Exit codes: 0 ok / 1 usage / 5 unsupported-schema / 7 atomic-write /
+#             32 regression / 33 baseline-missing / 34 dataset-empty.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec python -m bin._eval_gate.main "$@"

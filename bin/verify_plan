@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# bin/verify_plan — JSON Schema validator for plan substrate.
+#
+# Per implplan §B.impl.2 + §B.impl.4 + §B.impl.7. Thin POSIX wrapper
+# around `bin/_render_plan/verify.py` (which uses both _render_plan
+# helpers and the _verify_plan strict module).
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec python -m bin._render_plan.verify "$@"

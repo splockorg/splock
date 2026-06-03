@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/splockorg/splock/blob/main/schemas/failure_v1.schema.json",
+  "title": "Failure-capture record",
+  "description": "Schema for docs/plans/<slug>/_failures/<failure_id>.json. Per splock implplan §J.impl.5. One file per halt; context inputs are references-not-inline.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "failure_id",
+    "captured_at",
+    "chain_id",
+    "session_id",
+    "plan_slug",
+    "halt_reason",
+    "halted_at_phase",
+    "halted_at_iteration",
+    "context_inputs",
+    "context_outputs",
+    "scorer_emissions",
+    "operator_disposition",
+    "promoted_to_regression_case"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "failure_id": {"type": "string", "minLength": 1},
+    "captured_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"},
+    "chain_id": {"type": "string", "minLength": 1},
+    "session_id": {"type": "string", "minLength": 1},
+    "plan_slug": {"type": "string", "minLength": 1},
+    "halt_reason": {
+      "type": "string",
+      "enum": [
+        "retry_exceeded",
+        "tampering_detected",
+        "budget_exhausted",
+        "wall_clock_cap",
+        "guardrail_refused",
+        "orphan_state",
+        "verify_failed",
+        "plan_rejected"
+      ]
+    },
+    "halted_at_phase": {
+      "type": "string",
+      "enum": ["plan", "implplan", "code", "test"]
+    },
+    "halted_at_iteration": {"type": "integer", "minimum": 0},
+    "context_inputs": {"type": "object"},
+    "context_outputs": {"type": "object"},
+    "scorer_emissions": {"type": "array", "items": {"type": "string"}},
+    "operator_disposition": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+    "promoted_to_regression_case": {"oneOf": [{"type": "string"}, {"type": "null"}]}
+  }
+}

@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# bin/intent — agent-session intent registry CLI (implplan §P.impl).
+#
+# POSIX shell wrapper that activates the project venv and dispatches to
+# `python -m bin._intent.main`. All subcommands + flags are owned by the
+# Python entry point; this wrapper exists only to centralize venv
+# activation + repo-root resolution.
+#
+# Subcommands (per §P.impl.3 table):
+#   check    --area <ID> [--paths <globs>] [--host <h>] [--json]
+#   register --area <ID> --paths <globs> --kind <enum> [--closure <spec>]
+#            [--design-pattern <text>] [--plan <slug>] [--chain-id <id>]
+#            [--dry-run] [--json]
+#   update   <session_id> [--paths <globs>] [--status <S>] [--note <text>]
+#            [--dry-run] [--json]
+#   complete <session_id> [--reason <text>] [--dry-run] [--json]
+#   list     [--area <ID>] [--kind <enum>] [--host <h>]
+#            [--active|--closed|--all] [--json]
+#   pivot    <session_id> --area <new_ID> [--paths <globs>]
+#            [--dry-run] [--json]
+#   doctor   [--dry-run] [--json] [--reconcile-sync-pending|--no-reconcile]
+#
+# Exit codes (per §A.impl.3a shared registry):
+#   0  ok
+#   1  usage
+#   2  enum_violation
+#   7  atomic_write_failed
+#   40 intent_collision_detected
+#   41 intent_session_not_found
+#   42 intent_closure_trigger_open_ended
+#
+# Lazy-doctor trigger (T5 — intent_session_auto_register):
+#   `register` post-success fires
+#   `bin/_intent.doctor_trigger.trigger_background()` (research
+#   Decision 3 trigger #2). `doctor` always runs in the foreground and
+#   resets the rate-limit timestamp at `~/.intent_doctor_last_run`
+#   (trigger #3). The CLI surface is unchanged by T5; the trigger
+#   wiring lives inside `bin/_intent/main.py`.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec python -m bin._intent.main "$@"

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/splockorg/splock/blob/main/schemas/develop_plan_telemetry_v1.schema.json",
+  "title": "develop_plan_telemetry",
+  "description": "Sidecar namespaced under a task-entry object inside <slug>/_state.json. Sole writer: `bin/update_orchestrator --from-develop-plan` per implplan §E.impl.4. Closed-enum strictness enforced via Python validation; no LLM emits this content.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "schema_version", "iteration_history", "iteration_overflow"],
+  "properties": {
+    "source": {
+      "type": "string",
+      "enum": ["develop-plan-v1-bridge"]
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "iteration_history": {
+      "type": "array",
+      "maxItems": 21,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["round", "started_at", "ended_at", "outcome"],
+        "properties": {
+          "round": {"type": "integer", "minimum": 1, "maximum": 100},
+          "started_at": {"type": "string", "format": "date-time"},
+          "ended_at": {"type": "string", "format": "date-time"},
+          "outcome": {
+            "type": "string",
+            "enum": ["needs_revision", "approved", "blocked", "overflow_sentinel"]
+          },
+          "evaluator_notes_ref": {"type": "string"}
+        }
+      }
+    },
+    "iteration_overflow": {"type": "boolean"}
+  }
+}

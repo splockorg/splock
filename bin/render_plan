@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# bin/render_plan — JSON-canonical plan substrate renderer.
+#
+# Per implplan §B.impl.2 + §B.impl.4. Thin POSIX wrapper around
+# `bin/_render_plan/main.py`. Activates the project venv if available so
+# operator invocations from outside PyCharm have the right interpreter.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Activate venv if present and not already active (idempotent).
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec python -m bin._render_plan.main "$@"

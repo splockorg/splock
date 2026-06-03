@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# bin/regression-replay — side-by-side replay for operator review (§J.impl.6).
+#
+# Auto-grader meta-scorer is OUT OF SCOPE for v2.7 per §J.impl.13 #1;
+# deferred behind marker AGR (operator-authorized mint).
+#
+# Exit codes: 0 ok / 1 usage / 22 case-not-found.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec python -m bin._regression_replay.main "$@"

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# bin/update_orchestrator — canonical task-state update CLI (implplan §E.impl).
+#
+# Two invocation modes:
+#   bin/update_orchestrator <slug> <task_id> <canonical_status> [--pointer P] [--reason R]
+#   bin/update_orchestrator --from-develop-plan <slug> <task_id> <native_status>
+#
+# Stamps `emitted_by="bin/update_orchestrator"` or
+# `bin/update_orchestrator --from-develop-plan"` respectively.
+#
+# Exit codes: closed enum per §A.impl.3a registry. See
+# `bin/_update_orchestrator/exit_codes.py`.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec python -m bin._update_orchestrator.main "$@"

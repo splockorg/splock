@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/splockorg/splock/blob/main/schemas/scores_label_v1.schema.json",
+  "title": "Score label row",
+  "description": "Schema for a `label` row in docs/plans/<slug>/_scores.jsonl. Per splock implplan §J.impl.4. Joins to an emission row via score_id_ref. Append-only; the original emission is never modified.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "row_type",
+    "score_id_ref",
+    "label_ts",
+    "ground_truth_label",
+    "ground_truth_source"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "row_type": {"type": "string", "const": "label"},
+    "score_id_ref": {"type": "string", "pattern": "^score_[0-9a-f]{8}$"},
+    "label_ts": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"},
+    "ground_truth_label": {
+      "type": "string",
+      "enum": ["true-positive", "false-positive", "true-negative", "false-negative", "n/a"]
+    },
+    "ground_truth_source": {
+      "type": "string",
+      "enum": ["operator_morning_review", "operator_direct", "auto_test"]
+    },
+    "operator_notes": {"type": "string"}
+  }
+}

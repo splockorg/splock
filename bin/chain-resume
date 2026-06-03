@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# bin/chain-resume — operator entry point to resume a paused overnight chain (CCOR.1 T-6).
+#
+# Per implplan §T-6 + design_resolutions R-exit-codes + R-orphan-detection +
+# R-inject-size + R-stamp-before-release. Thin POSIX wrapper around
+# `bin/_chain_resume/main.py`. Activates the project venv if available so
+# operator invocations from outside PyCharm have the right interpreter.
+#
+# Usage:
+#   bin/chain-resume --slug <slug> [--inject "free-text"]
+#
+# Exit codes (per bin/_chain_overnight/exit_codes.py):
+#   0  = success (manifest stamped, pause sentinel released, log row emitted)
+#   2  = driver crash (plan-dir missing, chain_id mismatch, inject validation,
+#         pre-existing _operator_inject.md, etc.)
+#   22 = not paused / orphan-paused (no sentinel, OR sentinel + dead driver,
+#         OR sentinel + missing running lock — crashed-during-pause family)
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Activate venv if present and not already active (idempotent).
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec python -m bin._chain_resume.main "$@"

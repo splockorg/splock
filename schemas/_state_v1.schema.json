@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/splockorg/splock/blob/main/schemas/_state_v1.schema.json",
+  "title": "Canonical _state.json substrate v1",
+  "description": "Schema for docs/plans/<slug>/_state.json per v2.7 §E.2 (canonical-state-in-JSON; markdown-derived). Codifies the v2.7 §E.2 illustrative shape as the canonical contract; the smaller shipped shape (e.g. ctm-graph-wiring's `_state.json` carrying only `tasks[<id>].retry_count`) is honored via optional per-task fields and the `develop_plan_telemetry` namespace per §E.impl.4. The 7-status enum on `tasks[].status` MUST be exactly the closed set frozenset defined at bin/_update_orchestrator/state_writer.py SEVEN_STATUS (ready, wip, done, deferred, blocked, cancelled, unknown) — the enum below is the canonical mirror of that source-of-truth. `additionalProperties: true` at the root and on per-task objects is intentional per orch_status_render T1 qa mitigation (schemas should not freeze invariants prematurely; new namespaces are additive).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "slug", "phase", "tasks"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Forward-compat refusal pivot (per bin/_render_plan/schema_registry.py); bumps invalidate the renderer's old-version dispatch."
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$",
+      "description": "Plan slug; alphanumeric start, then alphanumeric + underscore + hyphen. Same pattern as orchestrator_v1.schema.json (handles real-world slugs like brand_handoff_gate, dev_request_queue)."
+    },
+    "phase": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Free-form phase name. Unlike orchestrator_v1's `const: Phase 3`, state files may name any phase since `_state.json` is the per-slug ledger across the slug's lifecycle (which can span phases)."
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "title", "status"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "title": {"type": "string", "minLength": 1},
+          "status": {
+            "type": "string",
+            "enum": ["ready", "wip", "done", "deferred", "blocked", "cancelled", "unknown"],
+            "description": "Canonical 7-status enum. Source of truth: bin/_update_orchestrator/state_writer.py:33-35 `SEVEN_STATUS = frozenset({...})`. This enum literal MUST stay byte-equal to that frozenset (verified by tests/splock/test_state_schema). Do not duplicate as a value list elsewhere; reference this schema or the state_writer constant."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO-8601 timestamp of the most recent transition into this task's current status. v2.7 §E.2 illustrative field; NOT populated by `bin/update_orchestrator` today (per T0 evidence B.8). Optional to honor the shipped minimum shape; a future PR may make it required after the writer is extended."
+          },
+          "updated_by_session": {
+            "type": "string",
+            "description": "Identifier of the session that performed the most recent transition (v2.7 §E.2 illustrative field). Optional per T0 B.8 — see updated_at note."
+          },
+          "pointer": {
+            "type": ["string", "null"],
+            "description": "Optional reference (e.g. external issue link) for tasks that were `deferred` or `cancelled` (v2.7 §E.2 illustrative field). Null permitted for the v2.7 example's `pointer: null` shape."
+          },
+          "tests_enabled": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Per-task array naming the tests whose passage signals task success (planner-authored; consumed by bin/verify and the chain's _test_expectations.json handoff per §1.D + §6.G.4). v2.7 §E.2 illustrative field."
+          },
+          "retry_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Iteration counter; populated by the chain driver's test-step retry loop. Present on the shipped minimal `_state.json` shape (per T0 evidence B.6)."
+          },
+          "ralph_results": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Open object for Ralph completion-gate verdicts associated with this task. v2.7 §E.2 illustrative field; shape kept open additively (future PRs may freeze it)."
+          },
+          "develop_plan_telemetry": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Sidecar populated by `bin/update_orchestrator --from-develop-plan` per implplan §E.impl.4. The closed-enum source-of-truth shape lives in schemas/develop_plan_telemetry_v1.schema.json (validated independently by the writer). Declared here as an open object so this schema does not duplicate the develop_plan_telemetry enum surface (deduplication consistent with the canonical-elsewhere lineage of `tasks[].status`)."
+          }
+        }
+      }
+    },
+    "ralph_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "description": "Top-level array form of ralph completion-gate verdicts as shown in v2.7 §E.2 illustrative example. v2.7 §E.2 illustrative field; per-task `ralph_results` object is a sibling shape (both honored as optional additive surfaces)."
+    },
+    "lifecycle": {
+      "type": "string",
+      "enum": ["active", "closed"],
+      "description": "Closed-state lifecycle mini-enum (plan_surgical_amend T4 / SC4). ADDITIVE field — the root's `additionalProperties: true` already permitted it, so declaring it here is NOT a version bump (validated by tests/splock/test_update_orchestrator/test_state_lifecycle_additive.py). Source-of-truth for the mini-enum values is bin/_update_orchestrator/closed_state.py LIFECYCLE_VALUES; this enum is the canonical mirror. ABSENT/missing degrades to `active` (NOT-closed): plans that completed before this shipped carry no `lifecycle` field and are never back-filled / auto-closed. Set to `closed` (together with `closed_at` + the `_orchestrator_closed.lock` sentinel marker) the first time the plan reaches all_done (picker exit-23 auto-close) or via `bin/update_orchestrator --close <slug>`."
+    },
+    "closed_at": {
+      "type": "string",
+      "description": "ISO-8601 timestamp stamped alongside `lifecycle: closed` on first close (plan_surgical_amend T4). Additive; absent while the plan is active."
+    }
+  }
+}

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# bin/route_issue — deferred-work routing CLI wrapper (implplan §L.impl).
+#
+# POSIX shell wrapper that activates the project venv and dispatches to
+# `python -m bin._route_issue.main`. All subcommands + flags are owned by
+# the Python entry point; this wrapper exists only to centralize venv
+# activation + repo-root resolution.
+#
+# Subcommands (per §L.impl.3):
+#   --type fix-now      --description "<gloss>" --context "<ref>"
+#   --type outstanding  --description "<gloss>" --context "<ref>"
+#                       [--blast-radius <int>] [--related <line-id-csv>]
+#   --type marker       --prefix <P> --trigger <spec> --context "<ref>"
+#   --type tier-promote --slug <slug> --context "<line_id>"
+#   --type escalate     --reason "<text>" --context "<ref>"
+#                       [--trigger-source <enum>]
+#   --check-scope       (meta — pre-commit hook entry point)
+#
+# Global flags: --dry-run, --json.
+#
+# Exit codes: closed-enum per §L.impl.3 table + §A.impl.3a registry.
+set -e
+
+# Resolve repo root from this script's location: bin/route_issue → REPO_ROOT
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Venv activation: try project venv path; fall back to environment-PATH python.
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec python -m bin._route_issue.main "$@"

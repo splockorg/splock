@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# bin/build_briefing — deterministic CLI-driven reviewer-prompt builder
+# (splock v2.7 §F.impl.6 + plan §F.9.2).
+#
+# Anchor §4a.3 element 3 — this script's output is the SOLE entry path
+# for runtime reviewer prompt construction. The output is built
+# EXCLUSIVELY from CLI-passed data + on-disk CLI artifacts (test
+# runner output / git diff / hook flag / plan + orchestrator JSON);
+# NEVER from agent-authored narrative.
+#
+# Distinction: this is the RUNTIME briefing builder. It is NOT the
+# build-time orchestrator §5 briefing framework that exists for
+# substrate-construction Sonnet reviews. The two systems share no
+# code path.
+#
+# Usage:
+#   bin/build_briefing <slug> --rubric-kind <test_step|plan_to_implplan|implplan_to_code> \
+#       [--iteration N] [--out PATH]
+#
+# Examples:
+#   # Test-step iteration 2 briefing → stdout
+#   bin/build_briefing my-slug --rubric-kind test_step --iteration 2
+#
+#   # plan→implplan boundary briefing → file
+#   bin/build_briefing my-slug --rubric-kind plan_to_implplan \
+#       --out /tmp/briefing.txt
+#
+# Exit codes (see `bin/verify` header for full list):
+#   0 = success; briefing written to stdout or --out
+#   1 = usage error
+#   7 = --out write failed
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Activate venv if present and not already active (idempotent).
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec python -m bin._retry_loop.main build-briefing "$@"

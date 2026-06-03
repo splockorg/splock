@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# bin/lazy-dump-check — lazy-dump-cap pre-commit hook CLI (implplan §L.impl.7).
+#
+# POSIX shell wrapper that activates the project venv and dispatches to
+# `python -m bin._route_issue.lazy_dump_check_cli`. Three invocation modes:
+#
+#   --pre-commit     (hook-driven; refuses on hard cap; warns on soft cap)
+#   --status         (print current counters; never refuses)
+#   --reset-session  (operator-only; zero per-session counter)
+#
+# Exit codes: 0 ok / 26 outstanding-cap-exceeded.
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec python -m bin._route_issue.lazy_dump_check_cli "$@"

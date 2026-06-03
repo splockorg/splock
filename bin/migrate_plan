@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# bin/migrate_plan — operator-driven legacy-MD onboarding helper.
+#
+# Per implplan §B.impl.8 lines 1317-1326. Intentionally NOT auto-
+# migration: every field requires operator-confirm. This CLI:
+#   1. Reads <slug>_plan.md if present
+#   2. Surfaces the heading structure as discovered fields
+#   3. Prompts the operator to confirm field mappings
+#   4. Writes a draft <slug>_plan.json
+#   5. Runs bin/verify_plan for confirmation
+#
+# Net-new plans only is the policy; this helper exists for the rare
+# case an operator wants to onboard a legacy markdown plan.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec python -m bin._render_plan.migrate "$@"

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# bin/verify — test-step retry loop + phase-boundary review CLI wrapper
+# (splock v2.7 §F).
+#
+# Per splock implplan §F.impl.2: thin POSIX wrapper around
+# `python -m bin._retry_loop.main`. Activates the project venv if
+# available so operator invocations from outside PyCharm have the
+# right interpreter.
+#
+# Anchor §4a.3 — this script is the RUNTIME §F.3 / §F.9 substrate
+# entry point invoked by `bin/chain-overnight` at phase boundaries +
+# inside the test-step retry loop. It is NOT a build-time orchestrator
+# §5 review framework caller.
+#
+# Subcommands:
+#   test-step <slug> --chain-id <id> [--max-retries N]
+#     Run the bounded test-step retry loop (§F.3).
+#
+#   boundary <slug> --chain-id <id> --boundary <plan_to_implplan|implplan_to_code>
+#     Run the runtime §F.9 phase-boundary review gate.
+#
+#   build-briefing <slug> --rubric-kind <kind> [--iteration N] [--out PATH]
+#     Deterministically build the runtime reviewer prompt from CLI
+#     artifacts (NEVER agent-authored — anchor §4a.3 element 3).
+#
+# Phase-spawn compatibility:
+#   bin/verify <slug> --phase <4|5> --chain-id <id>
+#     Used by `bin/_chain_overnight/phase_spawn.spawn_retry_loop_phase`.
+#     phase=5 → test-step path; phase=4 → no-op pass.
+#
+# Exit codes per implplan §A.impl.3a closed-enum shared registry:
+#   0  = success / READY verdict
+#   1  = usage error
+#   2  = driver crash
+#   5  = unsupported_schema_version OR insufficient_budget
+#   7  = atomic_write_failed (morning-review entry append failed)
+#   10 = phase_boundary_halt (HALT verdict from §F.9 reviewer)
+#   16 = verify_plan_rejected (SDK Structured-Output decode failure)
+#   17 = retry_exceeded (unified counter exhausted OR R4 tampering)
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Activate venv if present and not already active (idempotent).
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec python -m bin._retry_loop.main "$@"

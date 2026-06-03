@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/lessons_v1.schema.json",
+  "title": "lessons.md per-entry shape (v1)",
+  "description": "Per splock implplan §M.impl.5. Codifies the H2-block markdown shape per `docs/plans/<slug>/lessons.md` entry. SOLE source of truth for the 7-field per-entry contract. v2.7 ships v1; future bumps via lessons_v2.schema.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "date",
+    "title",
+    "task",
+    "approach",
+    "failure_mode",
+    "rejection",
+    "reattempt",
+    "source"
+  ],
+  "properties": {
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "description": "ISO-8601 date from the H2 header. Auto-stamped by `bin/lessons add`."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "One-line failure title from the H2 header (after the ISO date + em-dash)."
+    },
+    "task": {
+      "type": "string",
+      "pattern": "^T[0-9]+$",
+      "description": "Task identifier (T-prefixed integer). Cross-refs `(slug, task_id)` in the orchestrator substrate."
+    },
+    "approach": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Non-empty paragraph: what approach was attempted."
+    },
+    "failure_mode": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Non-empty paragraph: how the attempt failed."
+    },
+    "rejection": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Non-empty paragraph: why the approach was rejected (root-cause, not symptom)."
+    },
+    "reattempt": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Non-empty paragraph: conditions under which the approach might become viable again."
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^(_orchestrator_log\\.jsonl:line=[0-9]+|morning-review:[0-9]{4}-[0-9]{2}-[0-9]{2}:T[0-9]+|commit:[a-f0-9]{7,40})$",
+      "description": "Pointer to source-of-truth: _orchestrator_log.jsonl line number, morning-review entry, or git commit hash."
+    }
+  }
+}

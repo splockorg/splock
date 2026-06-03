@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/splockorg/splock/blob/main/schemas/regression_case_v1.schema.json",
+  "title": "Regression case record",
+  "description": "Schema for docs/plans/<slug>/_regression_cases/<case_id>.json. Per splock implplan §J.impl.6. Inline content snapshots for replay determinism.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "case_id",
+    "created_at",
+    "created_by",
+    "source_failure_id_ref",
+    "case_inputs",
+    "expected_outcome",
+    "expected_outcome_details",
+    "labels",
+    "case_status"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "case_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"},
+    "created_by": {"type": "string", "const": "operator"},
+    "source_failure_id_ref": {"type": "string", "minLength": 1},
+    "case_inputs": {"type": "object"},
+    "expected_outcome": {
+      "type": "string",
+      "enum": [
+        "scorer_should_flag",
+        "scorer_should_pass",
+        "system_should_halt",
+        "system_should_proceed",
+        "hook_should_refuse",
+        "hook_should_allow"
+      ]
+    },
+    "expected_outcome_details": {"type": "object"},
+    "operator_correction": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+    "labels": {"type": "array", "items": {"type": "string"}},
+    "case_status": {"type": "string", "enum": ["active", "retired"]}
+  }
+}

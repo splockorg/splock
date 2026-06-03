@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/splockorg/splock/blob/main/schemas/scores_emission_v1.schema.json",
+  "title": "Score emission row",
+  "description": "Schema for an `emission` row in docs/plans/<slug>/_scores.jsonl. Per splock implplan §J.impl.4. Append-only; joined to label rows via score_id <-> score_id_ref.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "row_type",
+    "score_id",
+    "ts",
+    "scorer_id",
+    "trace_id",
+    "session_id",
+    "score_value",
+    "score_category"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "enum": [1, 2]},
+    "row_type": {"type": "string", "const": "emission"},
+    "score_id": {"type": "string", "pattern": "^score_[0-9a-f]{8}$"},
+    "ts": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"},
+    "scorer_id": {
+      "type": "string",
+      "enum": [
+        "ralph_verifier",
+        "sonnet_review_R1_root_cause",
+        "sonnet_review_R2_what_missed",
+        "sonnet_review_R3_next_action",
+        "sonnet_review_R4_tampering",
+        "sonnet_review_R5_confidence",
+        "test_runner_exit",
+        "cost_per_phase",
+        "wall_time_per_phase",
+        "qualifying_run_count",
+        "revision_path_exercised",
+        "manual_correction_count"
+      ]
+    },
+    "trace_id": {"type": "string", "minLength": 1},
+    "session_id": {"type": "string", "minLength": 1},
+    "task_id": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+    "score_value": {"oneOf": [{"type": "string"}, {"type": "number"}]},
+    "score_category": {
+      "type": "string",
+      "enum": ["pass", "fail", "flagged", "unclear", "numeric"]
+    },
+    "scorer_attributes": {"type": "object"}
+  }
+}

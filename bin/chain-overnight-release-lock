@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# bin/chain-overnight-release-lock — sentinel-recovery wrapper.
+#
+# Per implplan §A.impl.2 (line 348: "Sentinel-recovery subcommand wrapper")
+# + §A.impl.4 (lines 430-440: "Recovery via `bin/chain-overnight
+# --release-lock <chain_id>`"). The actual logic lives in
+# `bin/_chain_overnight/main.py`'s --release-lock path; this is a thin
+# operator-ergonomics alias that mirrors the spec's separate-binary
+# entry. The spec mixes "chain-overnight-release-lock" (file-tree form)
+# and "chain-overnight --release-lock" (flag form); this wrapper makes
+# both invocations land at the same code path.
+#
+# §C KNOWN_WRITERS v4 (line 1772 of implplan + §C.impl.6 line 1741)
+# stamps log emissions through this path as
+# `emitted_by: "bin/chain-overnight --release-lock"` (flag-form name
+# retained for forensic traceability — the wrapper is operator-facing,
+# but the emitter identity is the canonical flag form).
+
+set -eu
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "${SCRIPT_DIR}/chain-overnight" --release-lock "$@"

@@ -1,0 +1,157 @@
+# splock
+
+**A governed plan → implement → verify lifecycle for Claude Code, with a
+deterministic enforcement spine.**
+
+splock is an [Anthropic Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+plugin. It turns ad-hoc agent work into a structured, reviewable lifecycle:
+you plan an initiative into an explicit specification, implement it task by
+task, and verify each task against a completion gate that an executing agent
+cannot talk its way past. The parts of the system that matter for correctness
+and safety live in deterministic code — shell hooks and CLI exit codes — not in
+prose an agent could ignore or a hostile input could overwrite.
+
+---
+
+## Why splock exists
+
+A capable coding agent left to free-form on a real codebase tends to: skip the
+plan, drift from scope, edit files outside its lane, declare success without
+running tests, and quietly weaken the very guardrails meant to stop it. Prompts
+that say "please run the tests" or "do not touch sealed files" are advisory —
+an agent can rationalize past them, and adversarial content the agent merely
+reads can instruct it to.
+
+splock's answer is to move every load-bearing decision out of the model:
+
+- **A written plan precedes code.** The planner emits a schema-valid plan
+  substrate and a rendered Markdown twin. The substrate is sealed — surgical
+  changes go through a dedicated amend path, never a raw edit.
+- **Work is gated, not trusted.** Each task carries explicit success criteria
+  and an enabled test set. A separately-pinned verifier decides readiness; the
+  coder cannot self-certify.
+- **Boundaries are enforced in hooks.** Sealed paths, suppression patterns,
+  unsafe package installs, and raw DDL are blocked by `PreToolUse` hooks that
+  return a non-zero exit code. Enforcement never depends on agent prose.
+- **State is the source of truth.** Orchestrator and plan state are JSON files
+  mutated only through a CLI, validated against JSON Schema, and append-only
+  where it matters.
+
+The result is a workflow you can hand to an autonomous or semi-autonomous agent
+and still reason about what it is structurally prevented from doing.
+
+---
+
+## The lifecycle
+
+splock ships a set of slash commands and the subagents and skills behind them:
+
+| Stage | Command | What it does |
+|---|---|---|
+| Reconnaissance | `/recon` | Survey the codebase / problem space before committing to a plan. |
+| Research | `/research` | Deeper external/internal investigation feeding a plan. |
+| Q&A | `/qna` | Capture an interactive Q&A log that a plan can ingest. |
+| Plan | `/plan` | Two-call planner → schema-valid plan substrate + Markdown twin. |
+| Implementation plan | `/implplan` | Expand a plan into an orchestrator DAG of tasks with dependencies. |
+| Code | `/code` | Execute a task under the completion gate (write code, run tests, iterate). |
+| Test | `/test` | Run the enabled test set across the plan / at a phase gate. |
+| Review | `/review` | Sonnet-class review at phase boundaries. |
+| QA | `/qa` | Adversarial review of a plan or an implementation. |
+| Wrap | `/wrap` | Fold an exploratory artifact into the plan record. |
+
+The two-call planner separates free-form reasoning (call 1) from constrained,
+schema-valid JSON emission (call 2). The completion gate ("Ralph gate") runs
+the coder in a retry loop and refuses to declare a task done until an
+independent verifier confirms a green test run.
+
+---
+
+## The enforcement spine
+
+Determinism is enforced by Claude Code lifecycle hooks (declared in
+`hooks/hooks.json`) and by CLI exit codes. The notable mechanisms:
+
+- **Sealed-state hooks** — block writes/deletes to plan state, orchestrator
+  state, the intent registry, and project secrets. The sealed inventory is a
+  closed list (`hooks/sealed_paths.txt`).
+- **Intent / collision registry** — sessions claim the paths they intend to
+  touch; overlapping claims halt by default. Backed by SQLite (zero external
+  dependency) with JSONL and MySQL alternatives.
+- **Suppression-pattern block** — refuses edits that would weaken tests or
+  silence checks.
+- **Package-safety + safe-DDL hooks** — refuse risky install commands and raw
+  schema DDL from a bash call.
+- **Pinned verifier model** — the verifier runs on a fixed, dated model and is
+  not adopter-tunable; the completion gate's determinism depends on it.
+
+---
+
+## Requirements
+
+- **Claude Code CLI `>= 2.1.160`** (see `docs/CLI_VERSION.md` for why and how to
+  pin it in CI).
+- **A POSIX environment.** The hooks and `bin/` wrappers are POSIX shell
+  (`#!/usr/bin/env bash`). Linux, macOS, and WSL2 are supported; there is no
+  Windows-native shell support in v1.
+- **Python 3.10+** for the `bin/` tooling. Pure standard library at runtime;
+  `jsonschema` is used when present and falls back to a hand-rolled validator
+  when absent.
+
+---
+
+## Install
+
+splock is distributed as a self-hosted Claude Code marketplace (the repo *is*
+the marketplace, and contains a single plugin).
+
+```text
+# In Claude Code, add this repo as a marketplace, then install the plugin:
+/plugin marketplace add splockorg/splock
+/plugin install splock@splock
+```
+
+To load directly from a working tree for development or evaluation:
+
+```bash
+claude --plugin-dir ./
+```
+
+Validate the manifests:
+
+```bash
+claude plugin validate . --strict
+```
+
+---
+
+## Configure
+
+splock ships working defaults; configuration is optional. The primary config
+surface is a per-project `.splock.toml` at your repo root (copy the one in this
+repo and edit). Every key has an environment-variable override. The full
+configuration interface — `.splock.toml` keys and the complete `SPLOCK_*`
+environment-variable set — is documented in **[ADOPTION.md](ADOPTION.md)**.
+
+Precedence (highest first): process environment variable → `.splock.toml` →
+built-in default at the call site.
+
+---
+
+## Documentation
+
+| Doc | What's in it |
+|---|---|
+| [DESIGN.md](DESIGN.md) | Architecture and design rationale — what splock is and how it works. |
+| [ADOPTION.md](ADOPTION.md) | Adopter quickstart: install, configure, the full `SPLOCK_*` env interface, the adoption smoke checks. |
+| [docs/SPEC_v2.7.md](docs/SPEC_v2.7.md) | The framework design specification (sanitized, repo-agnostic). |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute, including the DCO sign-off requirement. |
+| [CREDITS](CREDITS) | Prior art and influences. |
+| [docs/CLI_VERSION.md](docs/CLI_VERSION.md) | Minimum CLI version + CI pinning. |
+| [docs/PLUGIN_ENV_CONTRACT.md](docs/PLUGIN_ENV_CONTRACT.md) | `${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PLUGIN_DATA}` resolution contract. |
+
+---
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE). Contributions are accepted under the
+Developer Certificate of Origin — see [CONTRIBUTING.md](CONTRIBUTING.md).

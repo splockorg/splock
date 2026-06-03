@@ -1,0 +1,60 @@
+# permissions.deny — settings-level deny rules for sealed paths.
+#
+# Owned by §G.impl.13. Format: one Claude-Code permission-rule per line
+# (e.g., `Edit(path/glob)`, `Read(path/glob)`, `Write(path/glob)`,
+# `Bash(...)`).
+#
+# This file is the canonical inventory of paths that require
+# settings-level deny coverage in addition to JSON-deny hooks. The
+# defense-in-depth altitude per plan §G.2a / Finding 5 / gotcha #37210:
+# JSON deny is the primary mechanism; settings-level deny is the safety
+# net for Edit-tool gotcha cases where JSON deny is ignored.
+#
+# At runtime, the entries here are merged into `.claude/settings.json`'s
+# `permissions.deny[]` array per the operator's installation procedure
+# (bin/install-precommit-hooks or equivalent — see §N.impl).
+#
+# Pre-flight follow-up edit #3 (v1.4-parallel-revised-2 cross-section):
+# `docs/intent/intent_local.jsonl` entries — for §P registry append-only
+# enforcement.
+
+# --- Sealed-state per slug ---
+Edit(docs/plans/*/_state.json)
+Edit(docs/plans/*/_chain_sessions.json)
+Edit(docs/plans/*/_orchestrator_log.jsonl)
+Edit(docs/plans/*/*_plan.json)
+Edit(docs/plans/*/*_orchestrator.json)
+Write(docs/plans/*/_state.json)
+Write(docs/plans/*/_chain_sessions.json)
+Write(docs/plans/*/_orchestrator_log.jsonl)
+
+# --- §P agent-session intent registry (pre-flight follow-up #3) ---
+Edit(docs/intent/intent_local.jsonl)
+Write(docs/intent/intent_local.jsonl)
+
+# --- Project secrets / config ---
+Edit(.env)
+Edit(.env.*)
+Edit(.claude/agents/**)
+Edit(.claude/hooks/**)
+Edit(.claude/commands/**)
+Edit(.git/**)
+Write(.env)
+Write(.env.*)
+Write(.claude/agents/**)
+Write(.claude/hooks/**)
+Write(.claude/commands/**)
+
+# --- User-home credential paths (§G.7.2) ---
+Read(~/.aws/**)
+Read(~/.ssh/**)
+Read(~/.docker/config.json)
+Read(~/.kube/config)
+Read(~/.netrc)
+Read(~/.git-credentials)
+Write(~/.aws/**)
+Write(~/.ssh/**)
+Write(~/.docker/config.json)
+Write(~/.kube/config)
+Edit(~/.aws/**)
+Edit(~/.ssh/**)

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# bin/implplan — operator-direct planner CLI for the implplan (orchestrator) step.
+#
+# Per implplan §D.impl.2. Thin POSIX wrapper around
+# `bin/_planner/main.py implplan`. Reads <slug>_plan.json (must exist;
+# created by `bin/plan`), runs Call 1 + Call 2, writes
+# <slug>_orchestrator.json via §B atomic_write.
+#
+# Usage:
+#   bin/implplan <slug> [--tier=...] [--repo-state=...] [--chain-id=...]
+#
+# Exit codes per implplan §A.impl.3a (closed-enum shared registry):
+#   0  = success
+#   1  = usage error (e.g., <slug>_plan.json missing)
+#   7  = atomic write failed
+#   16 = SDK retry exhausted (error_max_structured_output_retries)
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Activate venv if present and not already active (idempotent).
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec python -m bin._planner.main implplan "$@"

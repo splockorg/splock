@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# POSIX shell wrapper for `bin/render_status_tree` (Python implementation
+# under bin/_render_status_tree/).
+#
+# Run from project root so module imports resolve.
+
+set -eu
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+cd "${REPO_ROOT}"
+
+VENV_PY="${SPLOCK_VENV:-.venv}/bin/python"
+if [ -x "${VENV_PY}" ]; then
+    PY="${VENV_PY}"
+else
+    PY="$(command -v python3 || command -v python)"
+fi
+
+exec "${PY}" -m bin._render_status_tree.main "$@"

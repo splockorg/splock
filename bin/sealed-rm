@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# bin/sealed-rm — operator-authorized deletion of sealed-state files.
+#
+# Sealed-state files (per .claude/hooks/sealed_paths.txt) are
+# CLI-managed; normal Edit/Write/Bash-delete paths are blocked by
+# chain-sealed-state-delete-block.sh for agent safety. This CLI is the
+# sanctioned operator-side delete channel.
+#
+# Three layered guards prevent agent invocation:
+#   1. TTY check — stdin must be a TTY (operator terminal, not agent
+#      subprocess). Claude Code's Bash tool runs commands without a TTY.
+#   2. --force flag required — no default-yes; operator types intent
+#      explicitly.
+#   3. Target must match a glob in sealed_paths.txt — refuses unsealed
+#      paths (use plain rm for those; this CLI is exclusively for sealed
+#      files so the audit trail stays meaningful).
+#
+# The sealed-state hook does NOT intercept this CLI because the Bash
+# command shape (`bin/sealed-rm --force <p>`) does not match any
+# DELETE_SHAPED_PATTERNS regex in pattern_detect.py — actual deletion
+# happens inside Python via Path.unlink(), which is invisible to the
+# Bash-command-shape regex matcher.
+#
+# Usage:
+#   bin/sealed-rm --force <path> [<path>...]
+#
+# Exit codes:
+#   0  = success (file(s) deleted)
+#   1  = usage error (missing --force, no targets, etc.)
+#   2  = path not in sealed inventory (use plain rm for unsealed paths)
+#   3  = path does not exist on disk
+#   4  = not running in operator TTY (agent-subprocess detection)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec python -m bin._sealed_rm.main "$@"

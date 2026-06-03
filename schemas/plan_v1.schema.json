@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/splockorg/splock/blob/main/schemas/plan_v1.schema.json",
+  "title": "Plan substrate v1",
+  "description": "Canonical schema for <slug>_plan.json per splock implplan §B.impl.3. v2.7 ship — `phase` literal is 'Phase 2' per take-back-to-v2.7 note (rename to 'plan' lands in v2 via Pillar 3.G).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "slug",
+    "phase",
+    "title",
+    "problem_statement",
+    "success_criteria",
+    "tasks_skeleton",
+    "tier"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version. v1 is the only supported version at v2.7 ship."
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$",
+      "description": "plan slug; alphanumeric start, then alphanumeric + underscore + hyphen; matches <slug>/<slug>_plan.json directory layout. Existing repo convention uses underscores (e.g., brand_handoff_gate, dev_request_queue) — pattern widened from kebab-case-only per §B/§C cross-section reconciliation."
+    },
+    "phase": {
+      "type": "string",
+      "enum": ["Phase 2"],
+      "description": "Closed enum; v2.7 carry-forward of v2.7 _state.json canonical example. Renames to 'plan' in v2."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "problem_statement": {
+      "type": "string",
+      "minLength": 1
+    },
+    "success_criteria": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "criterion"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "criterion": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "tasks_skeleton": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "depends_on"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "title": {"type": "string", "minLength": 1},
+          "depends_on": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        }
+      }
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["Tier 1", "Tier 2", "Tier 3"]
+    },
+    "non_goals": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "conceptual_architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overview", "components"],
+      "properties": {
+        "overview": {"type": "string"},
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "purpose", "dependencies"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "purpose": {"type": "string", "minLength": 1},
+              "dependencies": {
+                "type": "array",
+                "items": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "pointer"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["research", "recon", "qa", "qna"]
+          },
+          "pointer": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

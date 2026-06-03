@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/splockorg/splock/blob/main/schemas/plan_patch_v1.schema.json",
+  "title": "Plan patch substrate v1",
+  "description": "Canonical schema for the surgical-amend patch object emitted by Call 2 of the planner's --amend step (plan_surgical_amend SC1, task T1). The amend step emits a KEYED OP-LIST against an existing <slug>_plan.json rather than a full plan re-emission; bin/_planner/patch_apply.py (T2/T3) applies it deterministically. Draft-2020-12, STRICT (additionalProperties:false at every level) so an unknown field is REJECTED, never silently dropped. The per-op-kind addressing-key contract is tightened in T3 (id for success_criterion/task, name for component, kind+pointer for reference, index for non_goal, field for scalar); this schema already carries every key field under `address` so T3 can constrain it without a schema-version bump.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["patch_version", "ops"],
+  "properties": {
+    "patch_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Patch schema version. v1 is the only supported version at plan_surgical_amend ship."
+    },
+    "directive": {
+      "type": "string",
+      "description": "Optional echo of the operator-authored amend directive that produced this op-list. Free-form; recorded into the per-slug amend audit log (<slug>_amend_log.jsonl, T6g) alongside the ordered ops. Not load-bearing for apply."
+    },
+    "ops": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Ordered op-list. Multi-op patches are supported (>=1 op); patch_apply.py (T2/T3) applies ops in array order and enforces the op-count + touched-fraction bounds (T3).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["op_kind", "action", "address"],
+        "properties": {
+          "op_kind": {
+            "type": "string",
+            "enum": [
+              "success_criterion",
+              "task",
+              "component",
+              "reference",
+              "non_goal",
+              "scalar"
+            ],
+            "description": "Closed enum: which keyed collection / field family this op targets. success_criterion -> plan.success_criteria[]; task -> plan.tasks_skeleton[]; component -> plan.conceptual_architecture.components[]; reference -> plan.references[]; non_goal -> plan.non_goals[]; scalar -> a top-level scalar field (title/problem_statement/tier/...)."
+          },
+          "action": {
+            "type": "string",
+            "enum": ["replace", "add", "remove"],
+            "description": "Closed enum: replace an addressed entry, add a new entry, or remove an addressed entry. T2 enforces loud failure on missing-key replace, colliding add, and missing-key remove."
+          },
+          "address": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Keyed address resolving the target entry in the prior plan. Exactly one addressing form is meaningful per op_kind; the per-op-kind tightening (which key is required for which op_kind) lands in T3. At T1 the object is structurally permissive (every key optional) but additionalProperties:false bars unknown key shapes so T3 has a closed surface to constrain.",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Stable id key for op_kind in {success_criterion, task}. Matches success_criteria[].id / tasks_skeleton[].id."
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Name key for op_kind=component. Matches conceptual_architecture.components[].name."
+              },
+              "kind": {
+                "type": "string",
+                "minLength": 1,
+                "description": "First half of the (kind, pointer) composite key for op_kind=reference. Matches references[].kind. T0 confirmed (kind, pointer) is unique across the corpus, so it is a stable address; T3 rejects a non-unique reference tuple loudly."
+              },
+              "pointer": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Second half of the (kind, pointer) composite key for op_kind=reference. Matches references[].pointer."
+              },
+              "index": {
+                "type": "integer",
+                "description": "Positional index for op_kind=non_goal (non_goals is a bare string list with no natural key). Non-negative by contract; the >=0 bound is enforced at apply-time in patch_apply.py rather than in-schema because the Anthropic structured-output (constrained-decoding) endpoint rejects `minimum` on integer properties (verified live, SDK 0.104.0: \"For 'integer' type, property 'minimum' is not supported\"). T3 enforces add-only / index-addressed-remove (no paraphrase-match remove) and fails loudly on a stale/out-of-range/negative index."
+              },
+              "field": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Top-level field name for op_kind=scalar (e.g., 'title', 'problem_statement', 'tier'). Matches a scalar key on the plan root."
+              }
+            }
+          },
+          "value": {
+            "description": "Replacement / new value for action in {replace, add}. Shape is op_kind-dependent: an OBJECT for success_criterion/task/component/reference, a STRING for non_goal/scalar. MUST be absent for action=remove. The per-op-kind value shape (which object keys are required for which op_kind) is owned by patch_apply.py + post-apply re-validation of the whole plan against plan_v1 (T2) — NOT duplicated here. Encoded as anyOf[object, string] rather than a typeless 'any' because the Anthropic structured-output endpoint rejects a property with no `type` (\"Schema type is missing\") and rejects `oneOf` (\"Schema type 'oneOf' is not supported\"); `anyOf` and a closed object are both accepted (verified live, SDK 0.104.0). The object arm is a closed SUPERSET of every value-object's keys (additionalProperties:false to preserve strictness, so a stray key is still rejected); per-op-kind required-key tightening is T3's job.",
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Object-valued payload (success_criterion/task/component/reference). Closed superset of all four value-object key sets; the exact required subset per op_kind is enforced by patch_apply.py + plan_v1 re-validation (T2/T3).",
+                "properties": {
+                  "id": {"type": "string", "minLength": 1},
+                  "criterion": {"type": "string", "minLength": 1},
+                  "title": {"type": "string", "minLength": 1},
+                  "depends_on": {"type": "array", "items": {"type": "string"}},
+                  "name": {"type": "string", "minLength": 1},
+                  "purpose": {"type": "string", "minLength": 1},
+                  "dependencies": {"type": "array", "items": {"type": "string"}},
+                  "kind": {"type": "string", "minLength": 1},
+                  "pointer": {"type": "string", "minLength": 1}
+                }
+              },
+              {
+                "type": "string",
+                "description": "String-valued payload (non_goal/scalar)."
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

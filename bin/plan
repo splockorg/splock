@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# bin/plan — operator-direct planner CLI (Call 1 reasoning + Call 2 emission).
+#
+# Per implplan §D.impl.2. Thin POSIX wrapper around
+# `bin/_planner/main.py plan`. Activates the project venv if available
+# so operator invocations from outside PyCharm have the right interpreter.
+#
+# Usage:
+#   bin/plan <slug> [--tier=...] [--repo-state=...] [--chain-id=...]
+#
+# Exit codes per implplan §A.impl.3a (closed-enum shared registry):
+#   0  = success
+#   1  = usage error
+#   7  = atomic write failed
+#   16 = SDK retry exhausted (error_max_structured_output_retries)
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Activate venv if present and not already active (idempotent).
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec python -m bin._planner.main plan "$@"

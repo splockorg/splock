@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# POSIX shell wrapper for `bin/render_log` (Python implementation under
+# bin/_render_log/). Per implplan §C.impl.2 and §C.impl.10.
+#
+# Run from project root so module imports resolve.
+
+set -eu
+
+# Locate repo root (parent of this script's dir).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+cd "${REPO_ROOT}"
+
+# Prefer the project venv if present; otherwise rely on $PATH python.
+VENV_PY="${SPLOCK_VENV:-.venv}/bin/python"
+if [ -x "${VENV_PY}" ]; then
+    PY="${VENV_PY}"
+else
+    PY="$(command -v python3 || command -v python)"
+fi
+
+exec "${PY}" -m bin._render_log.main "$@"

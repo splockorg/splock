@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# bin/chain-overnight — overnight chain driver (splock v2.7 §A).
+#
+# Per implplan §A.impl + plan §A. Thin POSIX wrapper around
+# `bin/_chain_overnight/main.py`. Activates the project venv if available
+# so operator invocations from outside PyCharm have the right interpreter.
+#
+# Usage:
+#   bin/chain-overnight <starting-phase> <slug> [--max-tokens N] [--max-usd USD]
+#                                               [--wall-clock-seconds N]
+#                                               [--defer-threshold F]
+#                                               [--test-max-retries N]
+#                                               [--from-resume <chain_id>]
+#   bin/chain-overnight --release-lock <chain_id> <slug>
+#
+# Exit codes per implplan §A.impl.3a closed-enum shared registry:
+#   0  = success (all phases completed)
+#   2  = driver crash
+#   5  = budget below floor (propagated from §D PlannerBudgetRefused)
+#   7  = atomic_write_failed
+#   9  = sealed_path_refused (pre-stage safety net)
+#   10 = phase_boundary_halt
+#   11 = wall_clock_exceeded
+#   12 = cost_cap_exceeded
+#   13 = token_cap_exceeded
+#   14 = guardrail_refused
+#   15 = orphan_detected
+#   16 = verify_plan_rejected (§B verify failed OR §D retry exhausted)
+#   17 = retry_exceeded
+#   18 = operator_killed (per A.impl.10 #2)
+#   20 = chain_refused (concurrent chain via H.9 1C sentinel)
+#   21 = chain_foreign_sentinel (mid-chain foreign sentinel)
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+# Activate venv if present and not already active (idempotent).
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec python -m bin._chain_overnight.main "$@"

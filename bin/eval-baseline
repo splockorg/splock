@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# bin/eval-baseline — mint or list baselines (§J.impl.7).
+#
+# Usage:
+#   bin/eval-baseline <slug> --mint <name> [--notes <text>]
+#   bin/eval-baseline <slug> --list
+#
+# Exit codes: 0 ok / 1 usage / 5 unsupported-schema / 7 atomic-write /
+#             33 baseline-missing / 34 dataset-empty.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec python -m bin._eval_baseline.main "$@"

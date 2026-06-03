@@ -1,0 +1,19 @@
+{
+  "name": "splock",
+  "version": "0.1.0",
+  "description": "A governed plan -> implement -> verify lifecycle framework for Claude Code: deterministic enforcement spine (sealed-state hooks, intent/collision registry, Ralph completion gate) over a two-call planner, slash-command workflow, and subagent roster. Anthropic-native.",
+  "author": {
+    "name": "Splock",
+    "url": "https://github.com/splockorg/splock"
+  },
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/splockorg/splock",
+  "repository": "https://github.com/splockorg/splock",
+  "keywords": [
+    "claude-code",
+    "agentic",
+    "workflow",
+    "planning",
+    "governance"
+  ]
+}

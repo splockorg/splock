@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Per-clone one-time setup helper for `bin/git-merge-jsonl`.
+#
+# Per implplan §C.impl.9 lines 1914-1926. The `.gitattributes` line is
+# version-controlled with the repo and travels with every clone; however
+# git requires a `.git/config` driver definition that DOES NOT travel
+# with the repo (security: untrusted clones cannot inject merge drivers).
+# This script installs the per-clone driver registration.
+#
+# Idempotent: re-running is a no-op (`git config` overwrites the same key).
+#
+# Also idempotently registers the `.gitattributes` pattern so a fresh
+# clone gets both halves with one command.
+
+set -eu
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+cd "${REPO_ROOT}"
+
+GA_FILE="${REPO_ROOT}/.gitattributes"
+GA_LINE='docs/plans/*/_orchestrator_log.jsonl merge=jsonl-log'
+
+# Step 1 — register the merge driver in .git/config (per-clone).
+git config merge.jsonl-log.name \
+    "JSONL orchestrator log merge driver"
+git config merge.jsonl-log.driver \
+    'bin/git-merge-jsonl %O %A %B %L'
+git config merge.jsonl-log.recursive \
+    "binary"
+
+# Step 2 — ensure .gitattributes carries the registration pattern.
+if [ ! -f "${GA_FILE}" ]; then
+    touch "${GA_FILE}"
+fi
+
+if ! grep -F -q "_orchestrator_log.jsonl merge=jsonl-log" "${GA_FILE}"; then
+    # Append the line; preserve any existing entries.
+    # Use a tempfile + mv for atomicity per cross-cutting conventions.
+    TMP="$(mktemp -p "${REPO_ROOT}" .__install_merge_drivers__.XXXXXX)"
+    if [ -s "${GA_FILE}" ]; then
+        cat "${GA_FILE}" > "${TMP}"
+        # Ensure trailing newline before append.
+        tail -c1 "${TMP}" | read -r _ || printf '\n' >> "${TMP}"
+    fi
+    printf '%s\n' "${GA_LINE}" >> "${TMP}"
+    mv -f "${TMP}" "${GA_FILE}"
+    echo "registered: .gitattributes pattern for _orchestrator_log.jsonl"
+else
+    echo "already registered: .gitattributes pattern (no-op)"
+fi
+
+echo "installed: merge.jsonl-log driver registration in .git/config"
+echo "done."
