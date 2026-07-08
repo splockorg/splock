@@ -61,6 +61,43 @@ FORBIDDEN_IDENTITY = (
 PUBLIC_AUTHOR_EMAIL = "splockorg@users.noreply.github.com"
 
 
+# ---------------------------------------------------------------------------
+# Release-state history-hygiene gate.
+#
+# The three provenance assertions below (exactly-one-commit, org-identity
+# author/committer, no personal identity anywhere) describe the FROZEN
+# single-squashed-release state of the canonical origin repo. They fail by
+# construction on any working checkout — local dev commits, contributor
+# forks, adopter clones — so running them there is noise, not signal. Scope
+# them to the origin CI, where the release state is real, so local/PR-branch
+# scrub runs stay green.
+#
+# Enforced when EITHER:
+#   * SPLOCK_ENFORCE_HISTORY_HYGIENE=1 is set (the origin CI workflow sets
+#     this), OR
+#   * we are in GitHub Actions on the canonical repo (splockorg/splock).
+# Skipped everywhere else.
+# ---------------------------------------------------------------------------
+def _is_ci_on_origin() -> bool:
+    if os.environ.get("SPLOCK_ENFORCE_HISTORY_HYGIENE") == "1":
+        return True
+    return (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and os.environ.get("GITHUB_REPOSITORY", "").lower() == "splockorg/splock"
+    )
+
+
+_release_hygiene_gate = pytest.mark.skipif(
+    not _is_ci_on_origin(),
+    reason=(
+        "release-state history hygiene runs only in origin CI "
+        "(set SPLOCK_ENFORCE_HISTORY_HYGIENE=1, or run in splockorg/splock "
+        "GitHub Actions); the frozen single-commit assertions fail by "
+        "construction on any working checkout"
+    ),
+)
+
+
 def _claude_cli() -> str | None:
     """Path to the `claude` CLI, or None if not installed."""
     return shutil.which("claude")
@@ -373,12 +410,14 @@ def _git(*args: str) -> str:
     ).stdout
 
 
+@_release_hygiene_gate
 def test_exactly_one_commit() -> None:
     """The public history is a single squashed commit."""
     count = _git("rev-list", "--count", "HEAD").strip()
     assert count == "1", f"expected exactly 1 commit, found {count}"
 
 
+@_release_hygiene_gate
 def test_commit_author_is_public_org_identity() -> None:
     """The sole commit is authored + committed by the org noreply identity."""
     ae = _git("log", "-1", "--format=%ae").strip()
@@ -387,6 +426,7 @@ def test_commit_author_is_public_org_identity() -> None:
     assert ce == PUBLIC_AUTHOR_EMAIL, f"committer email {ce!r} != {PUBLIC_AUTHOR_EMAIL!r}"
 
 
+@_release_hygiene_gate
 def test_no_personal_identity_anywhere_in_history() -> None:
     """No personal name/email appears in any commit's author, committer, or
     message across the whole history.
