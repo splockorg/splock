@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Literal
 
+from bin._env_paths import project_root
 from .human_notes import (
     BOOTSTRAP_PLACEHOLDER,
     detect_outside_anchor_diff as _detect_outside_anchor_diff,
@@ -30,8 +31,25 @@ from .human_notes import (
 detect_outside_anchor_diff = _detect_outside_anchor_diff
 
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_TEMPLATES_DIR = _REPO_ROOT / ".claude" / "templates"
+_TEMPLATES_REL = Path(".claude") / "templates"
+
+
+def _template_path(filename: str) -> Path:
+    """Resolve one template file: adopter-repo override first, plugin second.
+
+    The fallback is PER FILE: an adopter repo may carry a
+    ``.claude/templates/`` dir with its own unrelated templates without
+    shadowing the splock set the plugin ships, and a file committed by the
+    adopter overrides the shipped copy of the same name. In-tree checkouts
+    resolve both candidates to the same file. When neither exists, the
+    plugin-shipped path is returned so the caller's error names the
+    canonical location.
+    """
+    project_candidate = project_root() / _TEMPLATES_REL / filename
+    if project_candidate.is_file():
+        return project_candidate
+    plugin_root = Path(__file__).resolve().parents[2]
+    return plugin_root / _TEMPLATES_REL / filename
 
 PlanKind = Literal["plan", "orchestrator", "state"]
 
@@ -61,7 +79,7 @@ class TemplateError(RuntimeError):
 
 
 def _load_template(kind: PlanKind) -> str:
-    template_path = _TEMPLATES_DIR / f"{kind}_md_canonical.md.template"
+    template_path = _template_path(f"{kind}_md_canonical.md.template")
     try:
         return template_path.read_text(encoding="utf-8")
     except OSError as exc:

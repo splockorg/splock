@@ -51,6 +51,7 @@ _DERIVED_ROOT = Path(__file__).resolve().parents[2]
 ENV_PLUGIN_ROOT = "CLAUDE_PLUGIN_ROOT"
 ENV_PLUGIN_DATA = "CLAUDE_PLUGIN_DATA"
 ENV_PROJECT_DIR = "CLAUDE_PROJECT_DIR"
+ENV_CALLER_PWD = "SPLOCK_CALLER_PWD"
 
 
 def plugin_root() -> Path:
@@ -80,17 +81,49 @@ def plugin_data_dir(create: bool = True) -> Path:
     return target
 
 
+# Marker that identifies an adopter-repo root when walking up from the
+# invoking directory.
+_PROJECT_MARKER = Path("docs") / "plans"
+
+
 def project_root(create: bool = False) -> Path:
     """The adopter project's repository root — where ``docs/plans/`` lives.
 
-    ``$CLAUDE_PROJECT_DIR`` when set (installed-plugin mode, pointing at the
-    adopting repo); otherwise the repo-root fallback (sideloaded / in-tree
-    mode, where the adopter repo IS the plugin repo). This is the writable
-    per-PROJECT root for plan substrate, distinct from :func:`plugin_data_dir`
-    (per-plugin state) and :func:`plugin_root` (read-only shipped assets).
+    Resolution order:
+
+    1. ``$CLAUDE_PROJECT_DIR`` when set (hook contexts; operators can export
+       it for terminal runs). Taken verbatim, no marker check.
+    2. The nearest ancestor of the invoking directory (including it) that
+       contains ``docs/plans/``. The walk starts from ``$SPLOCK_CALLER_PWD``
+       when set — the ``bin/*`` wrappers export their pre-``cd`` ``$PWD``
+       because they ``cd`` into the plugin/checkout root before ``exec``,
+       and the plugin ships its own ``docs/plans/`` marker, so process cwd
+       would otherwise match the ephemeral cache itself. This tier is what
+       makes plain ``bin/plan <slug>`` invocations work from inside an
+       adopter repo: ``CLAUDE_PROJECT_DIR`` is NOT exported to ordinary
+       Bash-tool / terminal invocations.
+    3. The derived repo root (sideloaded / in-tree mode, where the adopter
+       repo IS the plugin repo — it carries its own ``docs/plans/``, so this
+       resolves byte-identically to the historical ``parents[2]``).
+
+    This is the writable per-PROJECT root for plan substrate, distinct from
+    :func:`plugin_data_dir` (per-plugin state) and :func:`plugin_root`
+    (read-only shipped assets).
     """
     env = os.environ.get(ENV_PROJECT_DIR)
-    target = Path(env).resolve() if env else _DERIVED_ROOT
+    if env:
+        target = Path(env).resolve()
+    else:
+        caller_pwd = os.environ.get(ENV_CALLER_PWD)
+        start = (Path(caller_pwd) if caller_pwd else Path.cwd()).resolve()
+        target = next(
+            (
+                candidate
+                for candidate in (start, *start.parents)
+                if (candidate / _PROJECT_MARKER).is_dir()
+            ),
+            _DERIVED_ROOT,
+        )
     if create:
         target.mkdir(parents=True, exist_ok=True)
     return target

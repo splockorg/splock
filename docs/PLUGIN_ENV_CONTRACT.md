@@ -39,6 +39,29 @@ $CLAUDE_PLUGIN_DATA           (installed-plugin mode)
 The resolved data directory is created on first resolution (`mkdir -p`
 semantics) so callers can write immediately.
 
+### `project_root()` (+ `plans_dir()`)
+```
+$CLAUDE_PROJECT_DIR                       (hook contexts; exportable)
+  └─ else → nearest ancestor of the INVOKING dir containing docs/plans/
+            (walk starts at $SPLOCK_CALLER_PWD when set — the bin/*
+             wrappers export their pre-cd $PWD, because they cd into the
+             plugin root before exec and the plugin ships its own
+             docs/plans/ marker)
+  └─ else → repo root derived from bin/_env_paths/ location (parents[2])
+```
+The ADOPTER-REPO root: where `docs/plans/<slug>/` and all other project
+state live — the third root class next to `plugin_root()` (shipped
+read-only assets) and `plugin_data_dir()` (the plugin's own mutable
+state). The lifecycle packages resolve project state exclusively through
+it. The `$SPLOCK_CALLER_PWD` tier is load-bearing: `CLAUDE_PROJECT_DIR`
+is NOT exported to ordinary Bash-tool / terminal invocations, so without
+the caller-pwd walk-up every plain `bin/plan <slug>` run in
+installed-plugin mode would fall through to the plugin cache.
+
+In-tree checkouts are unaffected: the framework repo carries its own
+`docs/plans/`, so the walk (or the derived-root fallback) resolves to the
+same directory `parents[2]` always produced.
+
 ## Shell / hook usage
 
 Shell scripts (hooks, `bin/` wrappers) reference the read-only root directly as

@@ -50,6 +50,8 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Literal
 
+from bin._env_paths import project_root
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -316,9 +318,11 @@ def _ensure_morning_review_file(
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         return
-    # Try §H bootstrap first.
-    repo_root = Path(__file__).resolve().parents[2]
-    morning_review_bin = repo_root / "bin" / "morning-review"
+    # Try §H bootstrap first. parents[2] is the PLUGIN root — correct for
+    # locating the shipped binary, wrong as the working directory (the
+    # bootstrap must write the adopter's morning-review state).
+    plugin_root = Path(__file__).resolve().parents[2]
+    morning_review_bin = plugin_root / "bin" / "morning-review"
     if morning_review_bin.exists():
         try:
             subprocess.run(
@@ -329,7 +333,7 @@ def _ensure_morning_review_file(
                     "--slug",
                     slug,
                 ],
-                cwd=str(repo_root),
+                cwd=str(project_root()),
                 capture_output=True,
                 timeout=30,
                 check=False,
