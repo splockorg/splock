@@ -1,4 +1,4 @@
-"""Local-JSONL append + reconciliation for `docs/intent/intent_local.jsonl`.
+"""Local-JSONL append + reconciliation for the intent mirror `intent_local.jsonl`.
 
 Per implplan §P.impl.8 hybrid storage. Local-JSONL write is SYNCHRONOUS
 + REQUIRED (registration fails if local write fails — exit 7). MySQL
@@ -7,7 +7,8 @@ write-through is best-effort; failure flags `sync_pending=true` and
 
 Atomic temp+rename under `flock` on `<file>.lock` per cross-cutting
 implplan lines 281-290. Path is sealed per §P.impl.8 + §G.impl.5
-extension (`docs/intent/intent_local.jsonl` added to `sealed_paths.txt`).
+extension — co-located under the plugin data-root's `.plugin-data/` and sealed
+via the `.plugin-data/**` glob in `sealed_paths.txt`.
 
 JSONL row schema (forward-compat permissive read):
   - Pre-T1 rows lack `claude_session_id` — readers MUST tolerate
@@ -28,15 +29,24 @@ import tempfile
 from contextlib import contextmanager
 from typing import Any, Iterator, Optional
 
+from . import db
 
-def _repo_root() -> pathlib.Path:
-    # bin/_intent/jsonl_writer.py → bin/_intent → bin → REPO_ROOT
-    return pathlib.Path(__file__).resolve().parents[2]
+JSONL_FILE_NAME = "intent_local.jsonl"
 
 
 def intent_jsonl_path(repo_root: Optional[pathlib.Path] = None) -> pathlib.Path:
-    base = repo_root if repo_root is not None else _repo_root()
-    return base / "docs" / "intent" / "intent_local.jsonl"
+    """Resolve the local-JSONL mirror path.
+
+    Routed through :func:`bin._intent.db.resolve_data_root` so the mirror
+    co-locates with the SQLite db + settings overlay under the plugin
+    data-root (``$CLAUDE_PLUGIN_DATA`` -> ``$CLAUDE_PROJECT_DIR/.plugin-data``
+    -> ``./.plugin-data``), NEVER under the ``parents[2]`` repo root. The old
+    ``docs/intent`` layout leaked mutable state into the adopter repo and sat
+    in the ephemeral cache dir wiped ~7d post plugin-update (SC-C #4/#5). The
+    optional ``repo_root`` arg is an explicit data-root override for tests,
+    matching ``db.intent_sqlite_path``'s ``data_root`` semantics.
+    """
+    return db.resolve_data_root(repo_root) / JSONL_FILE_NAME
 
 
 def intent_jsonl_lock_path(repo_root: Optional[pathlib.Path] = None) -> pathlib.Path:
