@@ -78,8 +78,10 @@ OPERATOR_INJECT_FILENAME = "_operator_inject.md"
 POLL_INTERVAL_SECONDS = 5
 
 
+from bin._env_paths import plans_dir as _env_paths_plans_dir
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_PLANS_DIR = _REPO_ROOT / "docs" / "plans"
+_PLANS_DIR = _env_paths_plans_dir()
 
 
 # ----------------------------------------------------------------------

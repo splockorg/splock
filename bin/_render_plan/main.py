@@ -46,8 +46,10 @@ from .md_renderer import TemplateError, render_canonical_body
 
 PlanKind = Literal["plan", "orchestrator", "state"]
 
+from bin._env_paths import plans_dir as _env_paths_plans_dir
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_PLANS_DIR = _REPO_ROOT / "docs" / "plans"
+_PLANS_DIR = _env_paths_plans_dir()
 
 
 @dataclass

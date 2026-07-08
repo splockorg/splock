@@ -1,0 +1,19 @@
+# Optional runtime dependencies for splock's SDK-backed flows.
+#
+# The CORE substrate is stdlib-only (see bin/_env_paths.load_env_file and
+# ADOPTION.md). These two packages are imported LAZILY (inside functions,
+# never at module load) and are required ONLY for:
+#
+#   anthropic        -> bin/plan, bin/implplan   (two-call planner SDK calls)
+#   claude-agent-sdk -> bin/verify test-step      (Sonnet reviewer spawn in
+#                                                   the §F.3 retry loop)
+#
+# Install into the venv splock activates ($SPLOCK_VENV, else ./.venv):
+#
+#   pip install -r requirements-sdk.txt
+#
+# Version floors match the contracts the code was verified against
+# (bin/_planner/two_call.py: anthropic 0.104.0;
+#  bin/_retry_loop/sdk_spawners.py: claude-agent-sdk 0.2.87).
+anthropic>=0.104.0
+claude-agent-sdk>=0.2.87

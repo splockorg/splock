@@ -32,6 +32,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from bin._env_paths import project_root as _env_project_root
+
 from . import exit_codes
 from .orchestrator_loader import (
     OrchestratorJsonMalformedError,
@@ -55,8 +57,15 @@ from .state_loader import StateShapeInvalidError, load_state
 
 
 def _repo_root() -> Path:
-    """Resolve repo root by walking up: bin/_orchestrator_query/main.py → REPO_ROOT."""
-    return Path(__file__).resolve().parents[2]
+    """Resolve the adopter project root, honouring ``$CLAUDE_PROJECT_DIR``.
+
+    Delegates to ``bin._env_paths.project_root()`` so the picker resolves the
+    ADOPTER's ``docs/plans/`` (not the plugin install tree) when splock runs
+    as an installed plugin against a foreign project. Same fix class as OI-1,
+    which rewired the eight planner/render/chain entry points but missed this
+    one (fork finding F2).
+    """
+    return _env_project_root()
 
 
 def _plan_dir(slug: str, repo_root: Optional[Path] = None) -> Path:

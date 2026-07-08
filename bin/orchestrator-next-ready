@@ -34,4 +34,4 @@ if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
   source "$VENV"
 fi
 
-exec python -m bin._orchestrator_query.main "$@"
+exec "$(command -v python || command -v python3)" -m bin._orchestrator_query.main "$@"

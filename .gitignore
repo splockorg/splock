@@ -31,6 +31,10 @@ ENV/
 # the live state files.
 .plugin-data/*
 !.plugin-data/.gitkeep
+# docs/intent/ is intent-DB local state that leaks into the repo when the
+# intent writer resolves the repo root instead of CLAUDE_PLUGIN_DATA. Ignore
+# the live state; the durable fix is the state path (see outstanding_issues.md).
+docs/intent/
 
 # --- Local secrets / machine-specific config (never commit) ---
 .env

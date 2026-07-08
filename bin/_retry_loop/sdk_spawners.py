@@ -535,8 +535,26 @@ def run_verify_subprocess(
         )
 
     test_ids = sorted(union)
-    repo_root = pathlib.Path(__file__).resolve().parents[2]
-    argv = [sys.executable, "-m", "pytest", *test_ids, "-v"]
+
+    # Resolve the ADOPTER's repo root + interpreter, not the plugin's. When
+    # splock runs as an installed plugin, __file__/parents[2] is the plugin
+    # tree and sys.executable is the plugin venv — neither can see nor import
+    # the adopter's tests. Honour $CLAUDE_PROJECT_DIR + the adopter venv so
+    # the retry loop grades the RIGHT suite (fork finding F3; same
+    # adopter-root class as OI-1 / F2).
+    from bin._env_paths import project_root as _project_root
+
+    repo_root = _project_root()
+    interpreter = os.environ.get("SPLOCK_TEST_PYTHON") or ""
+    if not interpreter:
+        adopter_py = repo_root / ".venv" / "bin" / "python"
+        interpreter = str(adopter_py) if adopter_py.exists() else sys.executable
+
+    # tests_enabled are bare pytest node NAMES, not paths. Pass them as a
+    # `-k` selection expression — bare positional args are treated as file
+    # paths and collect nothing (the original bug).
+    selection = " or ".join(test_ids)
+    argv = [interpreter, "-m", "pytest", "-k", selection, "-v"]
 
     result = subprocess.run(
         argv,
