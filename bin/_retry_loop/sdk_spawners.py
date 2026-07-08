@@ -699,6 +699,31 @@ def _is_structured_output_retry_exhaustion(result_message: Any) -> bool:
     return False
 
 
+def _read_agent_prompt(
+    cwd: pathlib.Path, rel: pathlib.Path
+) -> str | None:
+    """Load an agent prompt: project override first, plugin-shipped second.
+
+    ``<cwd>/.claude/agents/<name>.md`` is the adopter-repo override (and the
+    in-tree location for embedded installs). The plugin package ships its
+    agent prompts at ``agents/<name>.md`` under the plugin root — without
+    this second candidate an installed plugin silently used the terse inline
+    fallback on every live run. Returns None when neither file is readable.
+    """
+    plugin_root = pathlib.Path(__file__).resolve().parents[2]
+    candidates = (
+        cwd / rel,
+        plugin_root / "agents" / rel.name,
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            try:
+                return candidate.read_text(encoding="utf-8")
+            except OSError:
+                continue
+    return None
+
+
 def _load_reviewer_system_prompt(cwd: pathlib.Path) -> str:
     """Read ``.claude/agents/reviewer.md`` if present; else fall back inline.
 
@@ -709,12 +734,9 @@ def _load_reviewer_system_prompt(cwd: pathlib.Path) -> str:
     driver workspace, or the repo hasn't been initialized), fall back
     to a minimal inline prompt that still anchors the rubric contract.
     """
-    candidate = cwd / _REVIEWER_AGENT_FILE
-    if candidate.is_file():
-        try:
-            return candidate.read_text(encoding="utf-8")
-        except OSError:
-            pass
+    loaded = _read_agent_prompt(cwd, _REVIEWER_AGENT_FILE)
+    if loaded is not None:
+        return loaded
     # Fallback inline prompt — keep terse; the rubric schema binding via
     # ClaudeAgentOptions.output_format does the heavy structural lifting.
     return (
@@ -861,9 +883,13 @@ def spawn_reviewer_via_sdk(
         ``is_error=True`` subtype), or if no ResultMessage arrived
         before the stream closed.
     """
-    # Resolve cwd default to repo root so .claude/agents/ is locatable.
+    # Resolve cwd default to the adopter-repo root: the reviewer session
+    # reads project tests/diffs, and the agent-prompt lookup falls back to
+    # the plugin-shipped agents/ dir via _read_agent_prompt.
     if cwd is None:
-        cwd = pathlib.Path(__file__).resolve().parents[2]
+        from bin._env_paths import project_root
+
+        cwd = project_root()
     cwd = pathlib.Path(cwd)
 
     # Resolve env vars.
@@ -1146,12 +1172,9 @@ def _load_coder_system_prompt(cwd: pathlib.Path) -> str:
     (operator running outside a chain-driver workspace, or the repo
     hasn't been initialized).
     """
-    candidate = cwd / _CODER_AGENT_FILE
-    if candidate.is_file():
-        try:
-            return candidate.read_text(encoding="utf-8")
-        except OSError:
-            pass
+    loaded = _read_agent_prompt(cwd, _CODER_AGENT_FILE)
+    if loaded is not None:
+        return loaded
     return (
         "You are the coder subagent for the §F.3 test-step retry loop. "
         "Implement the task at file_paths_touched; run tests via "
@@ -1677,7 +1700,8 @@ def smoke_check_sdk_available() -> tuple[bool, str]:
         return (
             False,
             f"claude-agent-sdk package is not installed or is "
-            f"unimportable: {exc}",
+            f"unimportable: {exc} "
+            f"(install it into the project venv: pip install claude-agent-sdk)",
         )
     except Exception as exc:  # noqa: BLE001 — pre-flight must not crash
         # Defensive: any other import-time exception (e.g. a syntax

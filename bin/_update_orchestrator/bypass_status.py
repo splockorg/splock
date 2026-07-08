@@ -23,6 +23,8 @@ import json
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
 
+from bin._env_paths import project_root
+
 QUALIFYING_EMITTER = "bin/update_orchestrator --from-develop-plan"
 BASE_EMITTER = "bin/update_orchestrator"
 CHAIN_DRIVER_EMITTER = "bin/chain-overnight"
@@ -249,7 +251,7 @@ def discover_plan_dirs(repo_root: Path) -> list[Path]:
 # ---------------------------------------------------------------------------
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return project_root()
 
 
 def _build_parser():

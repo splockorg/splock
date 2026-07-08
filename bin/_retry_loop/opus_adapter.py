@@ -44,6 +44,8 @@ from __future__ import annotations
 import contextlib
 import os
 import pathlib
+
+from bin._env_paths import project_root
 import subprocess
 from typing import Any, Callable, Iterator
 
@@ -55,15 +57,16 @@ HOOK_ENV_VAR_NAMES = ("SPLOCK_PLAN_SLUG", "SPLOCK_CHAIN_ID", "SPLOCK_PHASE")
 
 
 def _repo_root() -> pathlib.Path:
-    """Walk up from this file to the repo root (parent of bin/).
+    """Adopter-repo root via the env-contract resolver.
 
-    Mirrors the helper at
-    ``bin/_chain_overnight/phase_spawn.py::_repo_root``; kept here so
-    this module doesn't have a circular-import dependency on the chain
-    driver. The two helpers MUST resolve to the same path — both walk
-    up two parents from ``bin/_*/something.py``.
+    This is the working directory bound into the spawned SDK sessions —
+    the coder edits ADOPTER files and the reviewer reads ADOPTER tests and
+    diffs, so binding the plugin install tree (the historical ``parents[2]``
+    derivation) would point both agents at the wrong repo in
+    installed-plugin mode. Sideloaded / in-tree checkouts resolve
+    identically to before.
     """
-    return pathlib.Path(__file__).resolve().parents[2]
+    return project_root()
 
 
 @contextlib.contextmanager

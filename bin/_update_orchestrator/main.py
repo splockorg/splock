@@ -23,6 +23,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from bin._env_paths import project_root
+
 from .canonical_transitions import (
     VERDICT_ALLOW,
     VERDICT_REFUSE_DONE_WIP_NO_OVERRIDE,
@@ -83,8 +85,14 @@ from .telemetry_schema import (
 
 
 def _repo_root() -> Path:
-    """Resolve repo root by walking up: bin/_update_orchestrator/main.py → REPO_ROOT"""
-    return Path(__file__).resolve().parents[2]
+    """Resolve the adopter project root, honouring ``$CLAUDE_PROJECT_DIR``.
+
+    Delegates to ``bin._env_paths.project_root()`` so state flips land in the
+    ADOPTER's ``docs/plans/`` (not the plugin install tree) when splock runs
+    as an installed plugin — same fix class as the picker (fork finding F2);
+    this CLI is the write half of every ``/code`` status transition.
+    """
+    return project_root()
 
 
 def _plan_dir(slug: str, repo_root: Optional[Path] = None) -> Path:
