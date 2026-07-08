@@ -40,7 +40,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from bin._intent import db, settings as intent_settings  # noqa: E402
+from bin._intent import db, jsonl_writer, settings as intent_settings  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -50,17 +50,19 @@ def _plugin_data(monkeypatch, tmp_path):
 
 
 def test_sqlite_jsonl_overlay_share_one_data_root():
-    """A single seal-glob entry over the data-root dir suffices."""
+    """A single seal-glob entry over the data-root dir suffices — the SQLite
+    db, the settings overlay, AND the JSONL mirror all co-locate there."""
     root = db.resolve_data_root()
     sqlite_path = db.intent_sqlite_path()
     overlay = intent_settings.overlay_path()
+    jsonl = jsonl_writer.intent_jsonl_path()
     assert sqlite_path.parent == root
     assert overlay.parent == root
-    # Convention for the JSONL mirror (jsonl_writer.intent_jsonl_path
-    # uses a different layout under docs/intent/ today; the seal-glob
-    # lockstep contract here covers the NEW state surface T-C owns).
-    # Asserting both the SQLite + overlay file co-locate proves the
-    # lockstep tests can target one dir.
+    # The JSONL mirror is now routed through db.resolve_data_root() too, so a
+    # single `.plugin-data/**` seal-glob covers all three. This assertion is
+    # the regression guard for the jsonl-path re-thread: a revert to the old
+    # `docs/intent/` layout would fail here (and re-leak state into the repo).
+    assert jsonl.parent == root
 
 
 def test_data_root_env_override_is_honored(tmp_path, monkeypatch):

@@ -40,9 +40,6 @@ docs/plans/*/morning-review/**
 .plugin-data/intent_local.jsonl
 .plugin-data/intent_settings.json
 .plugin-data/**
-# Repo-relative JSONL mirror (writer's current layout — sealed for the
-# transition window until the data-root rethread completes).
-docs/intent/intent_local.jsonl
 
 # --- deferred-work routing ---
 # bin/route_issue and bin/lazy-dump-check own append-only writes to these
