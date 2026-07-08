@@ -44,7 +44,7 @@ if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
 fi
 
 # Forward stdin verbatim to the Python backing.
-python -m bin._hooks.test_at_edit >/dev/null 2>&1 || true
+"$(command -v python || command -v python3)" -m bin._hooks.test_at_edit >/dev/null 2>&1 || true
 
 "$REPO_ROOT/bin/hook-log" test-at-edit ok "post-edit verification dispatched" >/dev/null 2>&1 || true
 

@@ -26,7 +26,7 @@ fi
 
 HOOK_INPUT="$(cat || true)"
 
-STOP_HOOK_ACTIVE="$(printf '%s' "$HOOK_INPUT" | python -c '
+STOP_HOOK_ACTIVE="$(printf '%s' "$HOOK_INPUT" | "$(command -v python || command -v python3)" -c '
 import json, sys
 try:
     d = json.load(sys.stdin)

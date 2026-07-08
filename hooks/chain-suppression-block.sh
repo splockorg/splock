@@ -79,7 +79,7 @@ if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
 fi
 
 PYTHON_RESULT="$(
-  cd "$REPO_ROOT" && python -c '
+  cd "$REPO_ROOT" && "$(command -v python || command -v python3)" -c '
 import json
 import sys
 
@@ -104,7 +104,7 @@ print(json.dumps({"matches": matches, "file_path": file_path}))
 ' <<< "$HOOK_INPUT"
 )"
 
-export MATCHES="$(echo "$PYTHON_RESULT" | python -c 'import json,sys; d=json.load(sys.stdin); print(", ".join(d.get("matches", [])))')"
+export MATCHES="$(echo "$PYTHON_RESULT" | "$(command -v python || command -v python3)" -c 'import json,sys; d=json.load(sys.stdin); print(", ".join(d.get("matches", [])))')"
 
 if [ -z "$MATCHES" ]; then
   exit 0
@@ -121,7 +121,7 @@ fi
 # The prior bash-heredoc form interpolated them as raw text, producing
 # JSON that fails json.loads on every deny. MATCHES is exported above so
 # the child Python process sees the literal regex without bash re-parsing.
-python -c '
+"$(command -v python || command -v python3)" -c '
 import json, os
 matches = os.environ.get("MATCHES", "")
 envelope = {

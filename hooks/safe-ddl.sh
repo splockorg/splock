@@ -50,5 +50,5 @@ fi
 HOOK_INPUT="$(cat || true)"
 
 export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$REPO_ROOT"
-printf '%s' "$HOOK_INPUT" | python -m bin._hooks.safe_ddl_hook
+printf '%s' "$HOOK_INPUT" | "$(command -v python || command -v python3)" -m bin._hooks.safe_ddl_hook
 exit "$?"
