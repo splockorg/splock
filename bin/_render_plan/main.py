@@ -43,6 +43,7 @@ from .json_loader import (
 )
 from .md_parser import read_existing_md
 from .md_renderer import TemplateError, render_canonical_body
+from .render_invoker import _adapt_dict_tasks_to_list
 
 PlanKind = Literal["plan", "orchestrator", "state"]
 
@@ -87,6 +88,16 @@ def main(argv: list[str] | None = None) -> int:
     except JsonMalformedError as exc:
         _emit_stderr_json(exc.as_stderr_payload())
         return exit_codes.EXIT_JSON_MALFORMED
+
+    # F8: the `state` kind's canonical on-disk `_state.json` is deliberately
+    # minimal (dict-form `tasks`; no top-level `schema_version`/`slug`/`phase`)
+    # while `_state_v1.schema.json` + the renderer expect the v2.7 §E.2
+    # list-form. Route it through the SAME normalizer the in-process render
+    # path (`render_invoker._render_state_inner`) already applies, so the
+    # standalone CLI and the `bin/update_orchestrator` wiring accept
+    # byte-identical inputs. The on-disk file is NOT mutated (adapter copies).
+    if paths.kind == "state":
+        plan = _adapt_dict_tasks_to_list(plan, plan_dir=paths.json_path.parent)
 
     # Steps 3-4: schema-version dispatch + content validation.
     try:
