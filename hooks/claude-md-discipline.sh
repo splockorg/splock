@@ -18,7 +18,19 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# REPO_ROOT = the directory that contains bin/ . Prefer the Claude Code
+# plugin root (set for plugin hooks; holds bin/); else detect whether this
+# hooks dir sits one level (plugin layout) or two (embedded .claude/hooks/)
+# below the dir that holds bin/_hooks. Fixes the off-by-one that broke
+# `python -m bin._hooks.*` under the plugin layout (fork finding F6).
+__HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "${CLAUDE_PLUGIN_ROOT}/bin/_hooks" ]; then
+    REPO_ROOT="${CLAUDE_PLUGIN_ROOT}"
+elif [ -d "$__HOOK_DIR/../bin/_hooks" ]; then
+    REPO_ROOT="$(cd "$__HOOK_DIR/.." && pwd)"
+else
+    REPO_ROOT="$(cd "$__HOOK_DIR/../.." && pwd)"
+fi
 cd "$REPO_ROOT"
 
 VENV_PATH="${SPLOCK_VENV:-.venv}"
