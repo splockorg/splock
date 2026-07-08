@@ -16,4 +16,4 @@ if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
   source "$VENV"
 fi
 
-exec python -m bin._render_plan.verify "$@"
+exec "$(command -v python || command -v python3)" -m bin._render_plan.verify "$@"

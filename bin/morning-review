@@ -54,4 +54,4 @@ if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
     source "$VENV_PATH/bin/activate"
 fi
 
-exec python -m bin._morning_review.main "$@"
+exec "$(command -v python || command -v python3)" -m bin._morning_review.main "$@"

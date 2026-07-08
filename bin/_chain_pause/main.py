@@ -72,8 +72,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Repo root anchor: `bin/_chain_pause/main.py` → parents[2] = repo root.
+from bin._env_paths import plans_dir as _env_paths_plans_dir
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_PLANS_DIR = _REPO_ROOT / "docs" / "plans"
+_PLANS_DIR = _env_paths_plans_dir()
 
 # `emitted_by` constant. Must match the KNOWN_WRITERS entry registered
 # in `bin/_jsonl_log/writers.py` exactly (per implplan §C.impl.6 layer 1).

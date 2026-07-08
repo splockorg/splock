@@ -53,9 +53,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from dotenv import find_dotenv, load_dotenv
+from bin._env_paths import load_env_file
 
-load_dotenv(dotenv_path=find_dotenv(filename=".env"))
+load_env_file()
 
 from . import exit_codes
 from .patch_apply import (
@@ -86,8 +86,10 @@ from bin._update_orchestrator.closed_state import is_closed as _orchestrator_is_
 # Lazy-import §B's atomic write to keep the CLI import-light when only
 # `invoke_planner` is used programmatically.
 
+from bin._env_paths import plans_dir as _env_paths_plans_dir
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_PLANS_DIR = _REPO_ROOT / "docs" / "plans"
+_PLANS_DIR = _env_paths_plans_dir()
 
 
 def _build_parser() -> argparse.ArgumentParser:

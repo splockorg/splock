@@ -185,6 +185,21 @@ If you keep your virtualenv somewhere other than `./.venv`, export
 `SPLOCK_VENV=/path/to/venv` first so the wrappers and hooks activate the right
 interpreter.
 
+**SDK-backed flows need two optional packages.** The core substrate is
+stdlib-only, but the two-call planner (`bin/plan`, `bin/implplan`) imports
+`anthropic`, and the test-step retry loop (`bin/verify test-step`) imports
+`claude-agent-sdk` — both lazily, only when those flows run. Install them into
+the venv splock activates:
+
+```bash
+pip install -r requirements-sdk.txt   # anthropic + claude-agent-sdk
+```
+
+Without them those specific commands fail with a clear ModuleNotFoundError /
+`sdk_smoke_failed` naming the missing package; the rest of the substrate is
+unaffected. The SDK-backed flows also need `ANTHROPIC_API_KEY` on the
+environment (or in the repo-root `.env` that `load_env_file` reads).
+
 A green run of all three is the adoption gate: the plugin loads, the engine
 works, and the tree is clean.
 

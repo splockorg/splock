@@ -25,9 +25,9 @@ import sys
 import time
 from pathlib import Path
 
-from dotenv import load_dotenv
+from bin._env_paths import load_env_file
 
-load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+load_env_file(Path(__file__).resolve().parent.parent.parent / ".env")
 
 from . import db as _db  # noqa: E402
 from . import hook_writer  # noqa: E402

@@ -25,12 +25,12 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from dotenv import load_dotenv
+from bin._env_paths import load_env_file
 
 # Hooks invoke this module via subprocess from Claude Code, whose process
 # env has no SPLOCK_DB_* vars. Without this, every DB write silently no-ops
 # via _db.MySQLUnavailable and the session-tracking columns never populate.
-load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+load_env_file(Path(__file__).resolve().parent.parent.parent / ".env")
 
 from . import db as _db  # noqa: E402
 
