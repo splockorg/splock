@@ -293,6 +293,33 @@ def _read_prior_plan_json(plan_dir: Path, slug: str) -> str | None:
     return plan_json.read_text(encoding="utf-8")
 
 
+def _carry_forward_plan_phase(
+    orchestrator: Any, prior_plan_json: str | None
+) -> None:
+    """Stamp the plan's ``phase`` onto the orchestrator payload (implplan only).
+
+    Fixes the plan/orchestrator phase-label mismatch: ``orchestrator_v1``'s
+    ``phase`` is pinned by its OWN enum independently of the plan's, so a plan
+    phased "Phase 2" promotes to an orchestrator phased "Phase 3". The plan is
+    the authority (the orchestrator IS a promotion of THAT plan), so we stamp
+    ``plan.phase`` over whatever Call 2 emitted, mirroring the ``slug`` /
+    ``plan_ref`` stamp in ``main()``.
+
+    No-op when: the orchestrator payload is not a dict; there is no prior plan
+    (never the case for a valid implplan run — ``_build_inputs`` requires the
+    plan); the prior plan is unparseable JSON; or the prior plan omits
+    ``phase`` (``plan_v1`` requires it, so real plans always carry it).
+    """
+    if not isinstance(orchestrator, dict) or not prior_plan_json:
+        return
+    try:
+        prior = json.loads(prior_plan_json)
+    except (ValueError, TypeError):
+        return
+    if isinstance(prior, dict) and "phase" in prior:
+        orchestrator["phase"] = prior["phase"]
+
+
 def _resolve_plan_dir(slug: str) -> Path:
     """Resolve and validate the plan directory."""
     plan_dir = _PLANS_DIR / slug
@@ -1218,6 +1245,11 @@ def main(argv: list[str] | None = None) -> int:
         payload["slug"] = args.slug
         if args.step == "implplan":
             payload["plan_ref"] = f"{args.slug}_plan.json"
+            # Carry the plan's phase forward so the orchestrator does not
+            # disagree with the plan it was promoted from. Reuses the
+            # prior-plan bytes _build_inputs already loaded (non-None on the
+            # implplan path); no-op if the plan omits `phase`.
+            _carry_forward_plan_phase(payload, inputs.prior_plan_json)
 
     # Emit / write the result.
     if args.stdout:

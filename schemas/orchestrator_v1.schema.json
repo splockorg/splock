@@ -18,7 +18,8 @@
     },
     "phase": {
       "type": "string",
-      "enum": ["Phase 3"]
+      "enum": ["Phase 2", "Phase 3"],
+      "description": "Closed enum carried forward from the plan (plan_v1 pins 'Phase 2'); implplan stamps plan.phase over the Call-2-emitted value. 'Phase 3' retained so orchestrators emitted before the carry-forward still validate at render/verify (additive widening — no migration hazard)."
     },
     "plan_ref": {
       "type": "string",
