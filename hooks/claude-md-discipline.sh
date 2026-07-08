@@ -56,7 +56,7 @@ if [ "$HAVE_CLAUDE_MD" -eq 0 ]; then
 fi
 
 # Dispatch to Python backing.
-if python -m bin._hooks.claude_md_discipline; then
+if "$(command -v python || command -v python3)" -m bin._hooks.claude_md_discipline; then
     "$REPO_ROOT/bin/hook-log" claude-md-discipline ok "all staged CLAUDE.md clean" >/dev/null 2>&1 || true
     exit 0
 else

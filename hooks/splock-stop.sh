@@ -32,7 +32,7 @@ fi
 HOOK_INPUT="$(cat || true)"
 export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$REPO_ROOT"
 
-CLAUDE_SESSION_ID="$(printf '%s' "$HOOK_INPUT" | python -c '
+CLAUDE_SESSION_ID="$(printf '%s' "$HOOK_INPUT" | "$(command -v python || command -v python3)" -c '
 import json, sys
 try:
     d = json.loads(sys.stdin.read())
@@ -48,7 +48,7 @@ fi
 
 TMP_STDERR="$(mktemp 2>/dev/null || echo /tmp/splock-stop-stderr.$$)"
 WRITER_RC=0
-timeout 5 python -m bin._intent.hook_writer stop \
+timeout 5 "$(command -v python || command -v python3)" -m bin._intent.hook_writer stop \
     --session-id "$CLAUDE_SESSION_ID" \
     >/dev/null 2>"$TMP_STDERR" \
   || WRITER_RC=$?

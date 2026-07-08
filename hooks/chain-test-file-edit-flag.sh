@@ -70,7 +70,7 @@ fi
 
 PYTHON_RESULT="$(
   cd "$REPO_ROOT" && SPLOCK_PLAN_SLUG="$SPLOCK_PLAN_SLUG" SPLOCK_ITERATION_N="$SPLOCK_ITERATION_N" \
-  python -c '
+  "$(command -v python || command -v python3)" -c '
 import datetime
 import json
 import os

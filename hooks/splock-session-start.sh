@@ -104,7 +104,7 @@ export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$REPO_ROOT"
 # Python stdout straight through, so existing "silent" tests would
 # break if envelope-emit fired unconditionally).
 export SPLOCK_SESSION_START_SHELL_ENVELOPE=1
-HOOK_OUTPUT="$(printf '%s' "$HOOK_INPUT" | python -m bin._hooks.session_start_hook || true)"
+HOOK_OUTPUT="$(printf '%s' "$HOOK_INPUT" | "$(command -v python || command -v python3)" -m bin._hooks.session_start_hook || true)"
 unset SPLOCK_SESSION_START_SHELL_ENVELOPE
 
 # Phase 2 (T3 — intent_session_auto_register): auto-register dedup +
@@ -123,7 +123,7 @@ if [ -n "$SPLOCK_INTENT_SESSION_ID_VAL" ] && [ -n "$SPLOCK_CHAIN_ID_VAL" ]; then
     # T5 — still fire the doctor trigger even on dedup-skip; the
     # SessionStart event itself is operator activity, and the
     # rate-limit gate keeps the doctor from over-firing.
-    timeout 5 python -c "import sys; sys.path.insert(0, '$REPO_ROOT'); from bin._intent import doctor_trigger; doctor_trigger.trigger_background()" >/dev/null 2>&1 || true
+    timeout 5 "$(command -v python || command -v python3)" -c "import sys; sys.path.insert(0, '$REPO_ROOT'); from bin._intent import doctor_trigger; doctor_trigger.trigger_background()" >/dev/null 2>&1 || true
     exit 0
 fi
 
@@ -135,7 +135,7 @@ fi
 CLAUDE_SESSION_ID=""
 if [ -n "$HOOK_OUTPUT" ]; then
     PARSED="$(printf '%s' "$HOOK_OUTPUT" \
-        | python -c 'import json,sys
+        | "$(command -v python || command -v python3)" -c 'import json,sys
 try:
     for line in sys.stdin.read().splitlines():
         line=line.strip()
@@ -211,7 +211,7 @@ rm -f "$TMP_STDERR" 2>/dev/null || true
 # with start_new_session=True) — the foreground returns in <50ms. The
 # `timeout 5` is a guard against pathological flock contention. `|| true`
 # preserves the SessionStart fail-open contract.
-timeout 5 python -c "import sys; sys.path.insert(0, '$REPO_ROOT'); from bin._intent import doctor_trigger; doctor_trigger.trigger_background()" >/dev/null 2>&1 || true
+timeout 5 "$(command -v python || command -v python3)" -c "import sys; sys.path.insert(0, '$REPO_ROOT'); from bin._intent import doctor_trigger; doctor_trigger.trigger_background()" >/dev/null 2>&1 || true
 
 # Always exit 0 per SessionStart contract.
 exit 0

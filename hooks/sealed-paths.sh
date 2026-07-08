@@ -50,6 +50,6 @@ HOOK_INPUT="$(cat || true)"
 # while keeping cwd unchanged so the Python entry interprets paths
 # relative to the agent's working directory.
 export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$REPO_ROOT"
-printf '%s' "$HOOK_INPUT" | python -m bin._hooks.sealed_paths_hook
+printf '%s' "$HOOK_INPUT" | "$(command -v python || command -v python3)" -m bin._hooks.sealed_paths_hook
 EXIT="$?"
 exit "$EXIT"

@@ -36,4 +36,4 @@ if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
     source "$VENV_PATH/bin/activate"
 fi
 
-exec python -m bin._eval_gate.main --from-precommit-hook "$@"
+exec "$(command -v python || command -v python3)" -m bin._eval_gate.main --from-precommit-hook "$@"
