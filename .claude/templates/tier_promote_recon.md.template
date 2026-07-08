@@ -1,0 +1,19 @@
+# <new-slug> — recon
+
+> **Promoted from `docs/outstanding_issues.md`** line ID `<line_id>`
+> on `<promotion_timestamp>`. Originating plan: `<original_plan_slug>`.
+> Original deferral timestamp: `<original_timestamp>`.
+> Original deferral reason: `<original_deferral_reason>`.
+
+## Problem statement
+
+(populate during recon pass; reference origin line above for forensic
+chain.)
+
+## Scope
+
+## Open questions
+
+## References
+- Origin: `docs/outstanding_issues.md` — line ID `<line_id>`, status `promoted`
+- (additional references discovered during recon)

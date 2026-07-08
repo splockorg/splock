@@ -1,0 +1,13 @@
+## {date} — {title}
+
+**Task:** {task}
+
+**Approach attempted:** {approach}
+
+**Failure mode:** {failure_mode}
+
+**Why this approach was rejected:** {rejection}
+
+**Re-attempt criteria:** {reattempt}
+
+**Source:** {source}
