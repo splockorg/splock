@@ -315,6 +315,7 @@ End verified contract block — anchor for T3-T6 implementation work.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib
 import json
 import logging
@@ -805,6 +806,251 @@ def run_verify_subprocess(
 
     _persist_iter_output(plan_dir, iteration_n, result)
     return result
+
+
+#: ``SPLOCK_PHASE`` value at which the repair write-scope guard activates.
+#: Phase 5 is the /test test-step retry loop — the spawned Opus there is
+#: a REPAIR step and must not author test files / conftest. Phase 4
+#: (/code) routes through the SAME spawner (phase_spawn.spawn_retry_loop_phase
+#: dispatches both) but is exempt: the task coder legitimately authors
+#: its tests_enabled files (TDD).
+REPAIR_GUARD_PHASE = "5"
+
+#: Directory components ignored by the repair-scope file walks —
+#: interpreter/pytest byproducts the coder's own tool runs create
+#: legitimately (they are not authored content).
+_REPAIR_SCOPE_IGNORED_DIRS = frozenset({"__pycache__", ".pytest_cache", ".git"})
+_REPAIR_SCOPE_IGNORED_SUFFIXES = (".pyc", ".pyo")
+
+
+def _walk_file_hashes(
+    root: pathlib.Path, base: pathlib.Path
+) -> dict[str, str]:
+    """``{rel_posix_path: sha256}`` for files under ``root`` (rel to ``base``).
+
+    Skips `_REPAIR_SCOPE_IGNORED_DIRS` components, dot-directories, and
+    `_REPAIR_SCOPE_IGNORED_SUFFIXES` files. Empty dict when ``root`` is
+    missing. Unreadable files are skipped with a warning (they can
+    neither be protected nor flagged).
+    """
+    out: dict[str, str] = {}
+    if not root.is_dir():
+        return out
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if d not in _REPAIR_SCOPE_IGNORED_DIRS and not d.startswith(".")
+        ]
+        for fn in filenames:
+            if fn.endswith(_REPAIR_SCOPE_IGNORED_SUFFIXES):
+                continue
+            p = pathlib.Path(dirpath) / fn
+            try:
+                digest = hashlib.sha256(p.read_bytes()).hexdigest()
+            except OSError:
+                logger.warning(
+                    "repair-scope walk: unreadable file skipped: %s", p
+                )
+                continue
+            try:
+                out[p.relative_to(base).as_posix()] = digest
+            except ValueError:
+                continue
+    return out
+
+
+def snapshot_repair_write_scope(
+    cwd: pathlib.Path, *, slug: str | None = None
+) -> dict[str, Any]:
+    """Pre-spawn snapshot for `enforce_repair_write_scope`.
+
+    Captures, relative to ``cwd`` (the repo root the coder runs in):
+
+    - ``protected`` — ``{rel_path: bytes | None}`` full-content backups
+      of the gate's grading surface: every covering-set ``tests_enabled``
+      path (the orchestrator union at ``docs/plans/<slug>/
+      <slug>_orchestrator.json``), the conftest/ini trust surface for
+      those selectors (`pytest_trust_surface`), and every
+      ``conftest.py`` / pytest ini under ``tests/``. ``None`` records
+      "did not exist pre-spawn" so a post-spawn creation is detected
+      and deleted.
+    - ``tests_files`` — ``{rel: sha256}`` of every file under
+      ``tests/`` (creation/deletion/modification detection).
+    - ``plan_files`` — ``{rel: sha256}`` of every file under
+      ``docs/plans/<slug>/`` (the 2026-06-10 incident fabricated a
+      decision doc there), or ``None`` when no slug is resolvable.
+    """
+    cwd = pathlib.Path(cwd)
+
+    selectors: list[str] = []
+    if slug:
+        orch = cwd / "docs" / "plans" / slug / f"{slug}_orchestrator.json"
+        if orch.is_file():
+            try:
+                selectors = read_tests_enabled_union(orch)
+            except (ValueError, OSError, json.JSONDecodeError):
+                logger.warning(
+                    "snapshot_repair_write_scope: unreadable orchestrator "
+                    "at %s; covering-set protection degraded to "
+                    "conftest/tests-walk only",
+                    orch,
+                )
+
+    protected_rel: set[str] = set()
+    for selector in selectors:
+        path_part = selector.split("::", 1)[0].strip()
+        if path_part and not any(ch.isspace() for ch in path_part):
+            protected_rel.add(pathlib.PurePosixPath(path_part).as_posix())
+    protected_rel.update(pytest_trust_surface(selectors, cwd))
+
+    tests_files = _walk_file_hashes(cwd / "tests", cwd)
+    for rel in tests_files:
+        name = pathlib.PurePosixPath(rel).name
+        if name == _PYTEST_CONFTEST_BASENAME or name in _PYTEST_INI_BASENAMES:
+            protected_rel.add(rel)
+
+    protected: dict[str, bytes | None] = {}
+    for rel in sorted(protected_rel):
+        p = cwd / rel
+        if p.is_file():
+            try:
+                protected[rel] = p.read_bytes()
+            except OSError:
+                logger.warning(
+                    "snapshot_repair_write_scope: unreadable protected "
+                    "file skipped: %s",
+                    p,
+                )
+        else:
+            protected[rel] = None
+
+    plan_files: dict[str, str] | None = None
+    if slug:
+        plan_files = _walk_file_hashes(cwd / "docs" / "plans" / slug, cwd)
+
+    return {
+        "slug": slug,
+        "protected": protected,
+        "tests_files": tests_files,
+        "plan_files": plan_files,
+    }
+
+
+def _safe_unlink(p: pathlib.Path, stop_at: pathlib.Path) -> None:
+    """Unlink ``p`` and prune now-empty parent dirs up to ``stop_at``."""
+    try:
+        p.unlink()
+    except OSError:
+        return
+    try:
+        stop = stop_at.resolve()
+        parent = p.parent
+        while parent.resolve() != stop and parent.is_dir() and not any(
+            parent.iterdir()
+        ):
+            parent.rmdir()
+            parent = parent.parent
+    except OSError:
+        pass
+
+
+def enforce_repair_write_scope(
+    cwd: pathlib.Path, snapshot: dict[str, Any]
+) -> list[dict[str, str]]:
+    """Revert/flag repair-step writes to the gate's grading surface.
+
+    The fixer-must-not-author-tests enforcement (SC8): given a
+    `snapshot_repair_write_scope` snapshot taken BEFORE the repair Opus
+    session, restore the protected surface and sweep fabrications:
+
+    1. **Protected files** (covering-set tests, conftest.py, pytest
+       ini): created → deleted; modified → content restored from
+       snapshot; deleted → content restored from snapshot.
+    2. **New files under ``tests/``** → deleted (the 2026-06-01 +
+       2026-06-10 incidents both fabricated test files for
+       not-yet-started tasks).
+    3. **New files under ``docs/plans/<slug>/``** → deleted (the
+       2026-06-10 incident unilaterally authored a decision doc).
+    4. **Modified/deleted non-protected files** under the two sweep
+       roots → reported (``action: reported_only``) without restore
+       (no content snapshot is kept for the full tree); the
+       post-session git diff already carries them to the reviewer's
+       R4 tampering check.
+
+    Returns the violation list ``[{path, kind, action}, ...]`` —
+    ``kind`` ∈ {created, modified, deleted}; ``action`` ∈ {deleted,
+    restored, restore_failed, reported_only}. Empty list = the repair
+    step stayed inside its write scope.
+    """
+    cwd = pathlib.Path(cwd)
+    violations: list[dict[str, str]] = []
+
+    # 1. Protected surface — full restore.
+    for rel, before in (snapshot.get("protected") or {}).items():
+        p = cwd / rel
+        try:
+            after = p.read_bytes() if p.is_file() else None
+        except OSError:
+            after = None
+        if after == before:
+            continue
+        if before is None:
+            _safe_unlink(p, cwd)
+            violations.append(
+                {"path": rel, "kind": "created", "action": "deleted"}
+            )
+        else:
+            kind = "deleted" if after is None else "modified"
+            try:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_bytes(before)
+                action = "restored"
+            except OSError:
+                action = "restore_failed"
+            violations.append({"path": rel, "kind": kind, "action": action})
+
+    handled = {v["path"] for v in violations}
+
+    # 2-4. Creation/deletion/modification sweeps.
+    sweeps: list[tuple[str, dict[str, str] | None]] = [
+        ("tests", snapshot.get("tests_files")),
+    ]
+    slug = snapshot.get("slug")
+    if slug and snapshot.get("plan_files") is not None:
+        sweeps.append((f"docs/plans/{slug}", snapshot.get("plan_files")))
+
+    for root_rel, pre_hashes in sweeps:
+        if pre_hashes is None:
+            continue
+        post_hashes = _walk_file_hashes(cwd / root_rel, cwd)
+        pre_keys = set(pre_hashes)
+        post_keys = set(post_hashes)
+        for rel in sorted(post_keys - pre_keys):
+            if rel in handled:
+                continue
+            _safe_unlink(cwd / rel, cwd)
+            violations.append(
+                {"path": rel, "kind": "created", "action": "deleted"}
+            )
+            handled.add(rel)
+        for rel in sorted(pre_keys - post_keys):
+            if rel in handled:
+                continue
+            violations.append(
+                {"path": rel, "kind": "deleted", "action": "reported_only"}
+            )
+            handled.add(rel)
+        for rel in sorted(pre_keys & post_keys):
+            if rel in handled:
+                continue
+            if pre_hashes[rel] != post_hashes[rel]:
+                violations.append(
+                    {"path": rel, "kind": "modified", "action": "reported_only"}
+                )
+                handled.add(rel)
+
+    return violations
 
 
 # ----------------------------------------------------------------------
@@ -2269,7 +2515,11 @@ def spawn_opus_via_sdk(
     dict[str, Any]
         ``{'cost_usd': float, 'test_files_edited': list[str],
         'diff_lines_added': int, 'diff_lines_removed': int,
-        'diff_excerpt': str}``. ``cost_usd`` comes from
+        'diff_excerpt': str, 'repair_scope_violations': list[dict]}``.
+        ``repair_scope_violations`` is empty unless ``SPLOCK_PHASE`` equals
+        ``REPAIR_GUARD_PHASE``, in which case it carries whatever the
+        fixer-must-not-author-tests guard reverted or flagged.
+        ``cost_usd`` comes from
         ``ResultMessage.total_cost_usd`` (0.0 if None);
         ``test_files_edited`` is the post-session git diff's file list
         filtered to paths under ``tests/``; ``diff_lines_added`` /
@@ -2305,6 +2555,17 @@ def spawn_opus_via_sdk(
     # missing .git, etc.) — the diff capture step degrades gracefully.
     baseline_sha = _git_capture_head(cwd)
 
+    # fixer-must-not-author-tests (SC8): the Phase-5 repair spawn must not
+    # author the very files the gate grades it against. Snapshot the protected
+    # surface before the session; revert/flag after. Phase 4 (/code) routes
+    # through this same spawner but is EXEMPT — the task coder legitimately
+    # authors its tests_enabled files (TDD).
+    guard_phase = merged_env.get("SPLOCK_PHASE")
+    scope_snapshot: dict[str, Any] | None = None
+    if guard_phase == REPAIR_GUARD_PHASE:
+        scope_snapshot = snapshot_repair_write_scope(cwd, slug=plan_slug)
+    repair_scope_violations: list[dict[str, str]] = []
+
     # Lazy-import the SDK dataclass types at function-call time (NOT
     # module top) per T1 lazy-import discipline.
     from claude_agent_sdk import (  # local — preserve lazy-import
@@ -2332,31 +2593,44 @@ def spawn_opus_via_sdk(
         env=merged_env,
     )
 
-    result_message = asyncio.run(
-        _drive_opus_async(
-            prompt=prompt,
-            options=options,
-            client=client,
-        )
-    )
-
-    if result_message is None:
-        raise RuntimeError(
-            "coder SDK stream closed without yielding a ResultMessage "
-            f"(cwd={str(cwd)!r}, plan_slug={plan_slug!r}); the CLI "
-            "subprocess may have exited abnormally without emitting a "
-            "terminal message."
+    try:
+        result_message = asyncio.run(
+            _drive_opus_async(
+                prompt=prompt,
+                options=options,
+                client=client,
+            )
         )
 
-    if getattr(result_message, "is_error", False):
-        raise RuntimeError(
-            "coder SDK returned is_error=True "
-            f"subtype={getattr(result_message, 'subtype', '')!r} "
-            f"(cwd={str(cwd)!r}, plan_slug={plan_slug!r})"
-        )
+        if result_message is None:
+            raise RuntimeError(
+                "coder SDK stream closed without yielding a ResultMessage "
+                f"(cwd={str(cwd)!r}, plan_slug={plan_slug!r}); the CLI "
+                "subprocess may have exited abnormally without emitting a "
+                "terminal message."
+            )
 
-    # Capture post-session diff — this is the load-bearing T5 contract.
-    diff_payload = _capture_post_session_diff(cwd, baseline_sha)
+        if getattr(result_message, "is_error", False):
+            raise RuntimeError(
+                "coder SDK returned is_error=True "
+                f"subtype={getattr(result_message, 'subtype', '')!r} "
+                f"(cwd={str(cwd)!r}, plan_slug={plan_slug!r})"
+            )
+
+        # Capture post-session diff — this is the load-bearing T5 contract.
+        diff_payload = _capture_post_session_diff(cwd, baseline_sha)
+    finally:
+        # Enforcement runs even when the SDK call errored: a session that
+        # crashed AFTER fabricating files must still get them reverted.
+        if scope_snapshot is not None:
+            repair_scope_violations = enforce_repair_write_scope(cwd, scope_snapshot)
+            if repair_scope_violations:
+                logger.warning(
+                    "spawn_opus_via_sdk[%s]: repair write-scope violations "
+                    "reverted/flagged (fixer-must-not-author-tests): %s",
+                    plan_slug,
+                    repair_scope_violations,
+                )
 
     cost = getattr(result_message, "total_cost_usd", None)
     return {
@@ -2365,6 +2639,7 @@ def spawn_opus_via_sdk(
         "diff_lines_added": diff_payload["diff_lines_added"],
         "diff_lines_removed": diff_payload["diff_lines_removed"],
         "diff_excerpt": diff_payload["diff_excerpt"],
+        "repair_scope_violations": repair_scope_violations,
     }
 
 
