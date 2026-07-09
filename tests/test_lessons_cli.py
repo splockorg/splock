@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -215,19 +216,47 @@ def test_planner_looks_for_the_wrapper_under_the_plugin_not_the_adopter(
     plan_dir = tmp_path / "docs" / "plans" / "demo"
     plan_dir.mkdir(parents=True)
 
-    seen: dict[str, list[str]] = {}
+    seen: dict[str, Any] = {}
 
     def _fake_run(argv, **kwargs):
         seen["argv"] = argv
+        seen["env"] = kwargs.get("env")
         return subprocess.CompletedProcess(argv, 0, stdout="[]", stderr="")
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
     planner_main._read_lessons(plan_dir)
 
     assert seen["argv"][0] == str(plugin_root() / "bin" / "lessons")
-    assert seen["argv"][1:4] == ["query", "--slug", "demo"]
-    # ...and the adopter root is NOT where it looked.
+    # `query` takes the slug POSITIONALLY; only `list` accepts `--slug`. Passing
+    # `--slug` here made argparse exit 1, so `_read_lessons` returned "" even
+    # when the CLI existed. An earlier version of this test enshrined that bug.
+    assert seen["argv"][1:4] == ["query", "demo", "--json"]
+    # ...and the adopter root is NOT where it looked for the wrapper.
     assert str(tmp_path) not in seen["argv"][0]
+
+
+def test_planner_tells_the_subprocess_which_adopter_to_read(tmp_path, monkeypatch) -> None:
+    """The wrapper resolves its plans dir from the environment, not from argv.
+
+    Without this the subprocess would query whatever repo the planner happened to
+    be invoked from — typically the plugin — and return nothing for a slug that
+    plainly exists in `plan_dir`.
+    """
+    import bin._planner.main as planner_main
+
+    plan_dir = tmp_path / "docs" / "plans" / "demo"
+    plan_dir.mkdir(parents=True)
+
+    seen: dict[str, Any] = {}
+
+    def _fake_run(argv, **kwargs):
+        seen["env"] = kwargs.get("env") or {}
+        return subprocess.CompletedProcess(argv, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    planner_main._read_lessons(plan_dir)
+
+    assert seen["env"]["CLAUDE_PROJECT_DIR"] == str(tmp_path.resolve())
 
 
 def test_the_wrapper_the_planner_reaches_for_actually_ships() -> None:

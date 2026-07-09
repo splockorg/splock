@@ -252,10 +252,10 @@ def _read_md_group(plan_dir: Path, slug: str, stem: str) -> str:
 
 
 def _read_lessons(plan_dir: Path) -> str:
-    """Read `lessons.md` per slug via `bin/lessons query --json`.
+    """Read `lessons.md` per slug via `bin/lessons query <slug> --json`.
 
     Per F-02 of §M mid-section review 2026-05-21: §M.impl.5 prescribes
-    invoking `bin/lessons query --slug <slug> --json` so that lenient
+    invoking `bin/lessons query <slug> --json` so that lenient
     parsing drops malformed H2 blocks before they reach the planner LLM.
     On any failure (file missing, subprocess error, malformed output)
     return an empty string — the planner runs without lessons context
@@ -272,14 +272,28 @@ def _read_lessons(plan_dir: Path) -> str:
     bin_path = plugin_root() / "bin" / "lessons"
     if not bin_path.exists():
         return _read_optional_md(plan_dir, "lessons.md")
+
+    # ...and the subprocess must be told WHICH adopter to read. It resolves its
+    # own plans dir from the environment, so without this it would query the
+    # plugin's plan tree (or whatever repo the parent happened to be run from)
+    # and return nothing for a slug that plainly exists in `plan_dir`.
+    # `plan_dir` is `<adopter>/docs/plans/<slug>`; parents[2] is the adopter.
+    import os
     import subprocess
+
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(plan_dir.resolve().parents[2])}
     try:
+        # `query` takes the slug POSITIONALLY; only `list` accepts `--slug`.
+        # Upstream passed `--slug`, which argparse rejects with exit 1, so this
+        # helper returned "" even when the CLI was present. The docstring above
+        # inherited the same mistake.
         proc = subprocess.run(
-            [str(bin_path), "query", "--slug", slug, "--json"],
+            [str(bin_path), "query", slug, "--json"],
             capture_output=True,
             text=True,
             check=False,
             timeout=10,
+            env=env,
         )
     except (OSError, subprocess.SubprocessError):
         return ""

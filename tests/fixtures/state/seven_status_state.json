@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "slug": "seven-status",
+  "phase": "Phase 3",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Ready task",
+      "status": "ready"
+    },
+    {
+      "id": "T2",
+      "title": "Work-in-progress task",
+      "status": "wip"
+    },
+    {
+      "id": "T3",
+      "title": "Done task",
+      "status": "done"
+    },
+    {
+      "id": "T4",
+      "title": "Deferred task",
+      "status": "deferred"
+    },
+    {
+      "id": "T5",
+      "title": "Blocked task",
+      "status": "blocked"
+    },
+    {
+      "id": "T6",
+      "title": "Cancelled task",
+      "status": "cancelled"
+    },
+    {
+      "id": "T7",
+      "title": "Unknown-status task",
+      "status": "unknown"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "slug": "minimal-state",
+  "phase": "Phase 3",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "First task",
+      "status": "ready"
+    }
+  ]
+}

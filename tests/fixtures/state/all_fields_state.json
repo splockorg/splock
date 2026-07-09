@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "slug": "brand_handoff_gate",
+  "phase": "Phase 4",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Multi-pack SKU detection",
+      "status": "wip",
+      "pointer": null,
+      "retry_count": 0,
+      "tests_enabled": ["test_users_endpoint", "test_users_list"],
+      "updated_at": "2026-05-13T14:32:00Z",
+      "updated_by_session": "sess_abc123",
+      "develop_plan_telemetry": {
+        "source": "develop-plan-v1-bridge",
+        "schema_version": 1,
+        "iteration_history": [
+          {
+            "round": 1,
+            "started_at": "2026-05-13T14:00:00Z",
+            "ended_at": "2026-05-13T14:15:00Z",
+            "outcome": "needs_revision"
+          }
+        ],
+        "iteration_overflow": false
+      },
+      "ralph_results": {
+        "verdict": "READY",
+        "ts": "2026-05-13T14:32:00Z"
+      }
+    },
+    {
+      "id": "T2",
+      "title": "Class-C risk flagging",
+      "status": "done",
+      "pointer": "https://example.com/issues/42",
+      "retry_count": 3,
+      "tests_enabled": [],
+      "updated_at": "2026-05-13T14:40:00Z",
+      "updated_by_session": "sess_abc123"
+    }
+  ],
+  "ralph_results": [
+    {"task_id": "T1", "phase": "Phase 4", "verdict": "PENDING", "ts": null}
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "T1": {"status": "ready", "title": "First task"},
+    "T2": {"status": "ready", "title": "Second task"},
+    "T3": {"status": "ready", "title": "Third task"},
+    "T4": {"status": "ready", "title": "Fourth task"},
+    "T5": {"status": "ready", "title": "Fifth task"}
+  }
+}
