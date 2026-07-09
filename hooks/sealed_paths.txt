@@ -57,6 +57,24 @@ docs/plans/*/_spans.jsonl
 docs/plans/*/_scores.jsonl
 docs/plans/*/_failures/**
 
+# --- splock shipped substrate (self-modification guard) ---
+# This repo keeps agents / commands / hooks / skills at the TOP LEVEL; upstream
+# nests them under `.claude/`. Only the `.claude/` spellings were sealed, so an
+# agent could freely Edit `agents/coder.md`, `commands/code.md`, or even
+# `hooks/sealed-paths.sh` — the guard that was supposed to stop it. The prompts
+# an agent runs on, and the hooks that constrain it, are exactly what it must not
+# rewrite.
+#
+# These are relative-path globs. In installed-plugin mode the plugin tree is not
+# reachable from the adopter's cwd, so they cost nothing there; in an adopter
+# that happens to keep its OWN top-level `agents/` or `hooks/`, they over-seal.
+# That is the safe direction: a false refusal names the sanctioned path, a false
+# permit silently lets an agent edit the substrate that grades it.
+agents/**
+commands/**
+hooks/**
+skills/**
+
 # --- Project secrets / config (generic-recommended adopter entries) ---
 .env
 .env.*

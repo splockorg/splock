@@ -114,8 +114,10 @@ substrates and their rendered twins, baselines, regression cases, and the
 intent registry's local journal. The same inventory is mirrored as
 settings-level deny rules (`hooks/permissions.deny`) for defense in depth, so a
 known edit-tool gotcha that bypasses JSON-deny is still caught by the settings
-layer. Project secrets (`.env`, `.env.*`) and the plugin's own substrate
-(`.claude/agents/**`, `.claude/hooks/**`, `.claude/commands/**`) are sealed too.
+layer. Project secrets (`.env`, `.env.*`) and the plugin's own substrate are
+sealed too. This repo keeps that substrate at the top level — `agents/**`,
+`commands/**`, `hooks/**`, `skills/**` — and also seals the `.claude/`-nested
+spellings, which are where an *adopter* keeps its own equivalents.
 
 ### Intent / collision registry
 
