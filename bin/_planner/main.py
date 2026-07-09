@@ -262,7 +262,14 @@ def _read_lessons(plan_dir: Path) -> str:
     rather than blocking on infrastructure.
     """
     slug = plan_dir.name
-    bin_path = plan_dir.parent.parent.parent / "bin" / "lessons"
+    # `bin/lessons` ships with the PLUGIN; `lessons.md` lives in the ADOPTER's
+    # plan dir. Upstream derives the wrapper from `plan_dir.parent.parent.parent`
+    # — the adopter root — so under an installed plugin it is never found, and
+    # every /plan run silently degrades to the raw file read below, skipping the
+    # lenient parse that drops malformed H2 blocks before they reach the LLM.
+    from bin._env_paths import plugin_root
+
+    bin_path = plugin_root() / "bin" / "lessons"
     if not bin_path.exists():
         return _read_optional_md(plan_dir, "lessons.md")
     import subprocess
