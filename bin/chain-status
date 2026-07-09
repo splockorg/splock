@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# bin/chain-status — operator entry point to display chain status (CCOR.1 T-8 stub).
+#
+# Per implplan §T-8 + design_resolutions R-status-display-stub. Thin POSIX
+# wrapper around `bin/_chain_status/main.py`. Activates the project venv
+# if available so operator invocations from outside PyCharm have the right
+# interpreter.
+#
+# Usage:
+#   bin/chain-status --slug <slug> [--json]
+#
+# Exit codes:
+#   0  = success (status rendered to stdout)
+#   2  = usage error (unknown flag, missing slug, plan_dir absent)
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Preserve the invoking directory for bin/_env_paths.project_root():
+# the cd below moves to the plugin/checkout root, which in installed-
+# plugin mode is NOT the adopter repo whose chains we report on.
+export SPLOCK_CALLER_PWD="${SPLOCK_CALLER_PWD:-$PWD}"
+cd "$REPO_ROOT"
+
+# Activate venv if present and not already active (idempotent).
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec "$(command -v python || command -v python3)" -m bin._chain_status.main "$@"

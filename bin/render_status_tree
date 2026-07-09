@@ -9,7 +9,11 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-cd "${REPO_ROOT}"
+# Preserve the invoking directory for bin/_env_paths.project_root():
+# the cd below moves to the plugin/checkout root, which in installed-
+# plugin mode is NOT the adopter repo.
+export SPLOCK_CALLER_PWD="${SPLOCK_CALLER_PWD:-$PWD}"
+cd "$REPO_ROOT"
 
 VENV_PY="${SPLOCK_VENV:-.venv}/bin/python"
 if [ -x "${VENV_PY}" ]; then

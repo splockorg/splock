@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# POSIX shell wrapper for `bin/git-merge-jsonl` (Python under
-# bin/_git_merge_jsonl/). Per implplan §C.impl.9.
+# POSIX shell wrapper for `bin/state-divergence-check` (Python under
+# bin/_state_divergence/). Per implplan §C.impl.4.
 #
-# Git invokes this driver with: bin/git-merge-jsonl %O %A %B %L
+# Run from project root so module imports resolve.
 
 set -eu
 
@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Preserve the invoking directory for bin/_env_paths.project_root():
 # the cd below moves to the plugin/checkout root, which in installed-
-# plugin mode is NOT the adopter repo.
+# plugin mode is NOT the adopter repo whose state we replay.
 export SPLOCK_CALLER_PWD="${SPLOCK_CALLER_PWD:-$PWD}"
 cd "$REPO_ROOT"
 
@@ -22,4 +22,4 @@ else
     PY="$(command -v python3 || command -v python)"
 fi
 
-exec "${PY}" -m bin._git_merge_jsonl.main "$@"
+exec "${PY}" -m bin._state_divergence.main "$@"
