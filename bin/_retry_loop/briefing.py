@@ -72,6 +72,55 @@ DEBUG_PROMPT_FILENAME_TEMPLATE = "_sonnet_prompt_iter{n}.txt"
 HOOK_FLAG_ABSENT_SENTINEL = "(no test-file edits flagged this iteration)"
 
 
+# ----------------------------------------------------------------------
+# Iteration-diff sections — committed + working tree
+# ----------------------------------------------------------------------
+
+#: Stable literal heading for the committed (``HEAD~1..HEAD``) diff
+#: section. Kept verbatim from the original single-section shape so
+#: every existing consumer of the briefing structure stays valid.
+ITERATION_DIFF_HEADING = "## Iteration diff"
+
+#: Stable literal heading for the working-tree (uncommitted) diff
+#: section. During the §F.3 test-step retry loop, repair edits are
+#: UNCOMMITTED (the chain driver commits per-phase; the loop never
+#: commits) — this section is the live evidence the R4 tampering check
+#: audits. At phase boundaries the tree is clean post-commit and the
+#: section states that explicitly via WORKING_TREE_CLEAN_SENTINEL.
+WORKING_TREE_DIFF_HEADING = "## Working-tree diff (uncommitted)"
+
+#: Deterministic clean-tree statement — emitted (never omitted) when
+#: ``git diff HEAD`` is empty AND there are no untracked files, so the
+#: reviewer can distinguish "no uncommitted edits" from "capture failed".
+WORKING_TREE_CLEAN_SENTINEL = (
+    "(working tree clean — no uncommitted changes, no untracked files)"
+)
+
+#: Per-section byte cap for diff excerpts embedded in the briefing.
+#: Mirrors ``sdk_spawners.DIFF_EXCERPT_MAX_BYTES`` (50KB + trailing
+#: truncation sentinel) — duplicated rather than imported because
+#: ``sdk_spawners`` imports ``bin._verify_plan.strict`` which imports
+#: this module (importing it here would create a cycle).
+DIFF_SECTION_MAX_BYTES = 50_000
+
+#: Trailing sentinel appended to a truncated diff section — same
+#: discipline as ``sdk_spawners._DIFF_TRUNCATION_SENTINEL``.
+_DIFF_SECTION_TRUNCATION_SENTINEL = (
+    "\n... [diff truncated at DIFF_SECTION_MAX_BYTES bytes] ..."
+)
+
+
+# ----------------------------------------------------------------------
+# Canonical tests_enabled source — SC5 pin (real_tests_at_junctions T2)
+# ----------------------------------------------------------------------
+
+#: Filename pattern of THE canonical carrier of per-task ``tests_enabled``.
+#:
+#: Decision (real_tests_at_junctions SC5): ``<slug>_orchestrator.json``
+#: ``tasks[].tests_enabled`` is the single source of truth. ``_state.json``
+#: carries task statuses (plus retry/telemetry bookkeeping) ONLY — the
+#: shipped writer (``bin/_update_orchestrator/state_writer.py``) has never
+#: written a ``tests_enabled`` field. The pattern matches how
 #: ``bin/_retry_loop/main.py`` derives the orchestrator path
 #: (``plan_dir / f"{slug}_orchestrator.json"``).
 CANONICAL_TESTS_ENABLED_SOURCE = "{slug}_orchestrator.json"
@@ -177,48 +226,6 @@ class TestStepBriefingInputs:
     test_output: str
     iteration_diff: str  # committed scope: git diff HEAD~1..HEAD
     working_tree_diff: str  # uncommitted scope: git diff HEAD + untracked paths
-    hook_flag_content: str  # raw JSONL or HOOK_FLAG_ABSENT_SENTINEL
-    prior_diagnosis: dict[str, Any] | None  # structured Sonnet output from prior iter
-    iteration_metadata: dict[str, Any]  # driver-populated _metadata block
-
-
-@dataclass(frozen=True)
-class BoundaryBriefingInputs:
-    """Closed-list inputs for phase-boundary reviewer prompt construction.
-
-    Per plan §F.9.2 — the briefing builder reads structured artifacts
-    from the slug directory and emits a deterministic briefing dict.
-    """
-
-    slug: str
-    boundary: str  # "plan_to_implplan" | "implplan_to_code"
-    plan_summary: dict[str, Any]
-    orchestrator_shape: dict[str, Any]
-    planner_telemetry: list[dict[str, Any]]
-
-
-# ----------------------------------------------------------------------
-# Public entry: build_briefing
-# ----------------------------------------------------------------------
-
-
-# ----------------------------------------------------------------------
-# Briefing data structures
-# ----------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class TestStepBriefingInputs:
-    """Closed-list inputs for test-step reviewer prompt construction.
-
-    Per §F.impl.6 Input sources table — there are NO additional inputs
-    accepted by `build_briefing(...)`; each field maps to a CLI-derived
-    artifact.
-    """
-
-    slug: str
-    iteration_n: int
-    test_output: str
-    iteration_diff: str
     hook_flag_content: str  # raw JSONL or HOOK_FLAG_ABSENT_SENTINEL
     prior_diagnosis: dict[str, Any] | None  # structured Sonnet output from prior iter
     iteration_metadata: dict[str, Any]  # driver-populated _metadata block
@@ -479,6 +486,7 @@ def _gather_test_step_inputs(
         test_output = "(test output file not yet captured)"
 
     iteration_diff = _compute_iteration_diff(plan_dir)
+    working_tree_diff = _compute_working_tree_diff(plan_dir)
 
     hook_flag_path = plan_dir / HOOK_FLAG_FILENAME_TEMPLATE.format(n=iteration_n)
     if hook_flag_path.exists():
@@ -492,6 +500,7 @@ def _gather_test_step_inputs(
         iteration_metadata = _default_metadata(
             test_output=test_output,
             iteration_diff=iteration_diff,
+            working_tree_diff=working_tree_diff,
             hook_flag_content=hook_flag_content,
         )
 
@@ -500,6 +509,7 @@ def _gather_test_step_inputs(
         iteration_n=iteration_n,
         test_output=test_output,
         iteration_diff=iteration_diff,
+        working_tree_diff=working_tree_diff,
         hook_flag_content=hook_flag_content,
         prior_diagnosis=prior_diagnosis,
         iteration_metadata=iteration_metadata,
@@ -514,9 +524,11 @@ def _render_test_step_prompt(inputs: TestStepBriefingInputs) -> str:
     2. User prompt:
        a. ``## Iteration metadata`` JSON fence
        b. ``## Test runner output`` verbatim
-       c. ``## Iteration diff`` verbatim
-       d. ``## Test-file edit flag`` hook flag verbatim OR sentinel
-       e. ``## Prior diagnosis`` JSON fence if iter > 1
+       c. ``## Iteration diff`` verbatim (committed: HEAD~1..HEAD)
+       d. ``## Working-tree diff (uncommitted)`` verbatim (git diff HEAD
+          + untracked paths; explicit clean statement when clean)
+       e. ``## Test-file edit flag`` hook flag verbatim OR sentinel
+       f. ``## Prior diagnosis`` JSON fence if iter > 1
     3. Schema enforcement via SDK ``output_config.format`` (caller-side).
     """
     parts: list[str] = []
@@ -536,10 +548,25 @@ def _render_test_step_prompt(inputs: TestStepBriefingInputs) -> str:
     parts.append(inputs.test_output)
     parts.append("```")
     parts.append("")
-    parts.append("## Iteration diff")
+    parts.append(ITERATION_DIFF_HEADING)
+    parts.append("")
+    parts.append("Committed scope: `git diff HEAD~1..HEAD` (the last commit).")
     parts.append("")
     parts.append("```diff")
     parts.append(inputs.iteration_diff)
+    parts.append("```")
+    parts.append("")
+    parts.append(WORKING_TREE_DIFF_HEADING)
+    parts.append("")
+    parts.append(
+        "Working-tree scope: `git diff HEAD` (staged + unstaged) plus "
+        "untracked file paths. During the test-step retry loop, repair "
+        "edits are UNCOMMITTED — this section is the live evidence; the "
+        "committed section above carries the prior phase's last commit."
+    )
+    parts.append("")
+    parts.append("```diff")
+    parts.append(inputs.working_tree_diff)
     parts.append("```")
     parts.append("")
     parts.append("## Test-file edit flag")
@@ -587,6 +614,9 @@ Did this iteration edit test files in a way that weakens assertions?
 
 R4 == "yes-flagged" halts the retry loop regardless of test runner exit
 code. Use the `## Test-file edit flag` section as the primary input.
+This iteration's repair edits are UNCOMMITTED — audit them in the
+working-tree diff section; the committed diff section is the prior
+phase's last commit, not this iteration's work.
 
 ## R5 Confidence in R3
 - "high": fix likely succeeds in 1 iteration
@@ -724,8 +754,8 @@ This is a RUNTIME boundary review (per splock plan §F.9.1 +
 agent-authored summary.
 
 ## R1 tests_enabled consistency
-Does every task in `_state.json` have a `tests_enabled` entry
-consistent with the plan's overall test discipline?
+Does every task in `<slug>_orchestrator.json` have a `tests_enabled`
+entry consistent with the plan's overall test discipline?
 - "consistent" / "mismatch"
 - If "mismatch": populate `R1_mismatched_task_ids`.
 
@@ -736,8 +766,8 @@ that would force the coder to re-plan)?
 - If "flag": populate `R2_placeholder_sites`.
 
 ## R3 Dependency graph topology
-Does the dependency graph (per `_state.json` `depends_on`)
-topologically sort cleanly, or are there cycles?
+Does the dependency graph (per `<slug>_orchestrator.json`
+`depends_on`) topologically sort cleanly, or are there cycles?
 - "dag" / "cycle_detected"
 - If "cycle_detected": populate `R3_cycle_members`.
 
@@ -757,12 +787,42 @@ shouldn't be (per §G sealed-paths inventory + §M slopsquatting)?
 # Helpers — CLI artifact reading (all CLI-derived; no agent prose)
 # ----------------------------------------------------------------------
 
+def _git_cwd(plan_dir: Path) -> str:
+    """Resolve the git working directory for diff capture.
+
+    Same derivation the original single-section capture used: the plan
+    dir itself when it carries a ``.git``, else its parent (git resolves
+    the enclosing repo from any subdirectory).
+    """
+    return str(plan_dir.parent if not (plan_dir / ".git").exists() else plan_dir)
+
+
+def _cap_diff_section(raw: str) -> str:
+    """Apply the per-section byte cap + truncation sentinel.
+
+    Byte-cap discipline mirrors ``sdk_spawners._capture_post_session_diff``:
+    truncate at ``DIFF_SECTION_MAX_BYTES``, re-decode with
+    ``errors='replace'`` so a mid-codepoint cut doesn't crash, append
+    ``_DIFF_SECTION_TRUNCATION_SENTINEL``.
+    """
+    encoded = raw.encode("utf-8", errors="replace")
+    if len(encoded) <= DIFF_SECTION_MAX_BYTES:
+        return raw
+    head = encoded[:DIFF_SECTION_MAX_BYTES].decode("utf-8", errors="replace")
+    return head + _DIFF_SECTION_TRUNCATION_SENTINEL
+
+
 def _compute_iteration_diff(plan_dir: Path) -> str:
     """Compute ``git diff HEAD~1..HEAD`` at briefing-construction time.
 
     Per §F.impl.6 input sources table: iteration diff is captured via
     `git diff`, NOT via the Opus agent's description of changes. This is
     the structural exclusion mechanism for anchor §4a.3 element 3.
+
+    COMMITTED scope only — paired with ``_compute_working_tree_diff``,
+    which captures the uncommitted edits the test-step retry loop
+    produces (the loop never commits; the chain driver commits
+    per-phase).
 
     Falls back to a sentinel when:
     - Not a git repo (e.g., test environment)
@@ -772,7 +832,7 @@ def _compute_iteration_diff(plan_dir: Path) -> str:
     try:
         result = subprocess.run(
             ["git", "diff", "HEAD~1..HEAD"],
-            cwd=str(plan_dir.parent if not (plan_dir / ".git").exists() else plan_dir),
+            cwd=_git_cwd(plan_dir),
             capture_output=True,
             text=True,
             timeout=30,
@@ -783,13 +843,80 @@ def _compute_iteration_diff(plan_dir: Path) -> str:
         return "(git diff unavailable in this environment)"
     if result.returncode != 0:
         return "(git diff returned non-zero; no diff captured)"
-    return result.stdout or "(empty diff)"
+    if not result.stdout:
+        return "(empty diff)"
+    return _cap_diff_section(result.stdout)
+
+
+def _compute_working_tree_diff(plan_dir: Path) -> str:
+    """Capture the uncommitted working-tree state at briefing time.
+
+    Two deterministic CLI captures, composed in fixed order:
+
+    1. ``git diff HEAD`` — staged + unstaged changes to tracked files.
+    2. ``git status --porcelain`` ``??`` entries — untracked file paths
+       (paths only; ``git diff`` cannot content-diff untracked files).
+
+    A clean tree renders ``WORKING_TREE_CLEAN_SENTINEL`` explicitly —
+    never an absent/empty section — so the reviewer can tell "no
+    uncommitted edits" apart from "capture failed". Capture failures
+    fall back to the same sentinels as ``_compute_iteration_diff``.
+    """
+    cwd = _git_cwd(plan_dir)
+    try:
+        diff_result = subprocess.run(
+            ["git", "diff", "HEAD"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        status_result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.debug("working-tree diff capture failed: %s", exc)
+        return "(git diff unavailable in this environment)"
+    if diff_result.returncode != 0 or status_result.returncode != 0:
+        return "(git diff returned non-zero; no working-tree diff captured)"
+
+    tracked_diff = diff_result.stdout or ""
+    untracked = [
+        line[3:]
+        for line in (status_result.stdout or "").splitlines()
+        if line.startswith("?? ")
+    ]
+    if not tracked_diff.strip() and not untracked:
+        return WORKING_TREE_CLEAN_SENTINEL
+
+    parts: list[str] = []
+    if tracked_diff.strip():
+        parts.append(_cap_diff_section(tracked_diff))
+    else:
+        parts.append("(no uncommitted changes to tracked files)")
+    parts.append("")
+    parts.append("untracked files (paths only — content not diffable):")
+    if untracked:
+        parts.extend(untracked)
+    else:
+        parts.append("(none)")
+    # Cap the COMPOSED section too: the untracked enumeration lands after
+    # the tracked-diff cap, so a pathological tree could otherwise balloon
+    # the section past the per-section byte discipline.
+    return _cap_diff_section("\n".join(parts))
 
 
 def _default_metadata(
     *,
     test_output: str,
     iteration_diff: str,
+    working_tree_diff: str,
     hook_flag_content: str,
 ) -> dict[str, Any]:
     """Build a minimal `_metadata` block from CLI artifacts.
@@ -797,8 +924,16 @@ def _default_metadata(
     Per §F.5 / §F.impl.5: driver populates `_metadata` from deterministic
     inputs BEFORE the reviewer spawn. The block is surfaced as INPUT and
     echoed back in OUTPUT.
+
+    Line counts span BOTH diff sections (committed + working tree) —
+    during the retry loop the live edits are uncommitted, so counting
+    only the committed diff would report 0/0 for the very iteration
+    under review. (Untracked-path lines and clean/fallback sentinels
+    carry no ``+``/``-`` prefix, so they never inflate the counts.)
     """
-    added, removed = _count_diff_lines(iteration_diff)
+    added_c, removed_c = _count_diff_lines(iteration_diff)
+    added_w, removed_w = _count_diff_lines(working_tree_diff)
+    added, removed = added_c + added_w, removed_c + removed_w
     return {
         "test_files_edited_this_iteration": _extract_test_paths(hook_flag_content),
         "test_runner_exit_code": _guess_exit_code(test_output),
@@ -966,10 +1101,17 @@ def _read_planner_telemetry(plan_dir: Path) -> list[dict[str, Any]]:
 
 __all__ = [
     "BoundaryBriefingInputs",
+    "CANONICAL_TESTS_ENABLED_SOURCE",
     "DEBUG_PROMPT_FILENAME_TEMPLATE",
+    "DIFF_SECTION_MAX_BYTES",
     "HOOK_FLAG_ABSENT_SENTINEL",
     "HOOK_FLAG_FILENAME_TEMPLATE",
+    "ITERATION_DIFF_HEADING",
     "TEST_OUTPUT_FILENAME_TEMPLATE",
     "TestStepBriefingInputs",
+    "WORKING_TREE_CLEAN_SENTINEL",
+    "WORKING_TREE_DIFF_HEADING",
     "build_briefing",
+    "canonical_tests_enabled_path",
+    "resolve_tests_enabled",
 ]
