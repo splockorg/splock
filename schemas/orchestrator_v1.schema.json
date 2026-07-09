@@ -111,6 +111,16 @@
           "kind": {
             "type": "string",
             "enum": ["phase_boundary", "review_gate", "test_gate"]
+          },
+          "covers": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^T[A-Za-z0-9_-]+$"
+            },
+            "description": "OPTIONAL explicit covering set: task ids whose tests_enabled this junction consolidates (real_tests_at_junctions SC6). Items reuse the tasks[].id TaskId pattern. When absent, the documented default applies: all prior tasks through after_task in tasks-array order (see bin/_orchestrator_query/orchestrator_loader.py::junction_covering_set). An explicit empty array is rejected (minItems 1) — omit the field to get the default; a vacuous test_gate must not be expressible. Additive optional only: required triple and additionalProperties:false unchanged."
           }
         }
       }
