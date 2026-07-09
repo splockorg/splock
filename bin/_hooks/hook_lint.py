@@ -45,7 +45,10 @@ from bin._hooks import (
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-HOOKS_DIR = REPO_ROOT / ".claude" / "hooks"
+# This fork keeps hooks top-level. Pointing at the upstream `.claude/hooks/`
+# layout made `hook-lint --check` scan an empty directory and report
+# "0 hooks PASS" — a green light for a linter that examined nothing.
+HOOKS_DIR = REPO_ROOT / "hooks"
 
 
 @dataclass

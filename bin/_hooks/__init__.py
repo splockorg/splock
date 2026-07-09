@@ -74,4 +74,47 @@ __all__ = [
     "HOOK_LINT_EXIT_R_PACKAGE_SAFETY_CITATION",
     "HOOK_LINT_RULES",
     "HOOK_LOG_ACTIONS",
+    "hooks_dir",
+    "sealed_paths_file",
 ]
+
+
+def hooks_dir():
+    """Directory holding the shipped hook scripts + the seal inventory.
+
+    This fork keeps hooks at the TOP LEVEL (`hooks/`); upstream nests them under
+    `.claude/hooks/`. Modules that hardcoded the nested path silently found
+    nothing here — `hook_lint --check` reported "0 hooks PASS", and the two
+    sealed-path guards took their `FileNotFoundError -> allow` branch, failing
+    open. Resolve through one function so that mistake cannot be made per-module.
+    """
+    from pathlib import Path
+
+    from bin._env_paths import plugin_root
+
+    return plugin_root() / "hooks"
+
+
+def sealed_paths_file():
+    """Resolve the canonical sealed-path inventory.
+
+    Order: the `SPLOCK_SEALED_PATHS_FILE` test override, then an adopter-supplied
+    list in the invoking repo (either layout), then the plugin-shipped one.
+
+    A missing inventory means NO DEFENSE: both `sealed_paths_hook` and
+    `sealed_delete_hook` allow the operation and log a forensic note. Returning a
+    path that exists is therefore load-bearing, not cosmetic.
+    """
+    import os
+    from pathlib import Path
+
+    override = os.environ.get("SPLOCK_SEALED_PATHS_FILE", "").strip()
+    if override:
+        return Path(override)
+    for candidate in (
+        Path("hooks/sealed_paths.txt"),
+        Path(".claude/hooks/sealed_paths.txt"),
+    ):
+        if candidate.exists():
+            return candidate
+    return hooks_dir() / "sealed_paths.txt"
