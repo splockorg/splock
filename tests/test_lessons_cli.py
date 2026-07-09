@@ -158,9 +158,12 @@ this block is missing every required field
 def test_lenient_parse_drops_a_malformed_block() -> None:
     """This is the whole reason `_read_lessons` shells out to the CLI.
 
-    A malformed H2 block must never reach the planner LLM.
+    A malformed H2 block must never reach the planner LLM — and the drop must be
+    REPORTED, not silent. A lesson that vanishes without a warning is a lesson
+    the operator never learns was lost.
     """
-    entries = parse_lessons_md(_MALFORMED, lenient=True)
+    with pytest.warns(UserWarning, match="dropped malformed block"):
+        entries = parse_lessons_md(_MALFORMED, lenient=True)
     assert [e.title for e in entries] == ["a good one"]
 
 
@@ -172,7 +175,8 @@ def test_strict_parse_raises_on_the_same_input() -> None:
 def test_query_is_lenient_by_default_and_strict_on_request(adopter: Path) -> None:
     (adopter / "demo" / "lessons.md").write_text(_MALFORMED, encoding="utf-8")
 
-    assert len(query_lessons("demo", plans_dir=adopter)) == 1
+    with pytest.warns(UserWarning, match="dropped malformed block"):
+        assert len(query_lessons("demo", plans_dir=adopter)) == 1
     with pytest.raises(LessonsEntryMalformedError):
         query_lessons("demo", plans_dir=adopter, strict=True)
 
