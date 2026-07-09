@@ -95,6 +95,14 @@ class IterationRecord:
     default `None` so existing callers that don't supply cost (legacy
     tests, build-time fixtures) keep constructing IterationRecord
     cleanly.
+
+    `repair_scope_violations` mirrors the `cost_usd` pattern: the T8
+    repair write-scope guard (real_tests_at_junctions SC8,
+    `sdk_spawners.enforce_repair_write_scope`) returns its
+    reverted/flagged verdicts on the coder spawner result dict under
+    `'repair_scope_violations'`; the iteration loop threads them onto
+    the record so halt forensics carry the guard's evidence. Optional
+    with default `None` (legacy fixtures, verify-only entry records).
     """
 
     iteration_n: int
@@ -106,6 +114,7 @@ class IterationRecord:
     rubric: dict[str, Any] | None = None
     reviewer_model: str | None = None
     cost_usd: float | None = None
+    repair_scope_violations: list[dict[str, str]] | None = None
 
 
 # ----------------------------------------------------------------------
@@ -232,6 +241,7 @@ def run_iteration(
             diff_excerpt=diff_excerpt,
             rubric=None,
             cost_usd=iteration_cost,
+            repair_scope_violations=opus_result.get("repair_scope_violations"),
         )
         ctx.records.append(record)
         return IterationResult.PASSED
@@ -291,6 +301,7 @@ def run_iteration(
         rubric=rubric_payload,
         reviewer_model=rubric_payload.get("_reviewer_model"),
         cost_usd=iteration_cost,
+        repair_scope_violations=opus_result.get("repair_scope_violations"),
     )
     ctx.records.append(record)
 
@@ -317,6 +328,7 @@ def run_test_step_loop(
     run_verify_fn: Callable[..., subprocess.CompletedProcess] | None = None,
     spawn_reviewer_fn: Callable[..., dict] | None = None,
     initial_inject_text: str | None = None,
+    verify_first: bool = False,
 ) -> tuple[IterationResult, list[IterationRecord], float]:
     """Bounded iteration loop.
 
@@ -342,6 +354,26 @@ def run_test_step_loop(
     single budget per task. Ralph (NO) + reviewer (NEEDS_REVISION) +
     test-step retries all consume from the same number. The cap clamp
     composition: ``min(test_max_retries, remaining_unified_budget)``.
+
+    ``verify_first`` (verify-first reorder, real_tests_at_junctions
+    follow-up 2026-06-10): when True, run the verify subprocess ONCE
+    before the first repair spawn. A GREEN entry verify (returncode 0)
+    short-circuits to PASSED with zero opus / reviewer spawns — the two
+    live fabrication incidents (2026-06-01, 2026-06-10) both exploited
+    the idle iteration-1 repair window that exists when the suite is
+    already green; T8 made that window harmless (write-scope revert),
+    this makes it absent. A RED entry verify (any non-zero returncode,
+    including the T8 UNTRUSTED-GREEN coercion to 13) falls through to
+    the legacy loop unchanged: no IterationRecord is emitted for the
+    entry verify and the unified counter is NOT incremented (the entry
+    verify is not a repair attempt). The short-circuit is BYPASSED
+    entirely when an operator inject is pending (``initial_inject_text``
+    set, or ``_operator_inject.md`` on disk) — otherwise a green entry
+    would silently swallow the single-shot inject that iteration 1's
+    repair spawn is contracted to deliver. Default False preserves
+    legacy behavior byte-for-byte; the phase-4 ``/code`` dispatch MUST
+    NOT opt in (a doc-only task with trivially-green tests would
+    "pass" without ever spawning its task coder).
     """
     if max_retries is None:
         max_retries = _resolve_max_retries()
@@ -370,6 +402,58 @@ def run_test_step_loop(
         max_retries=effective_max,
         pending_inject_text=initial_inject_text,
     )
+
+    # Verify-first reorder — see the docstring paragraph above. The
+    # inject-pending bypass checks BOTH delivery channels: the
+    # phase-boundary consume result (`initial_inject_text`) and the
+    # on-disk `_operator_inject.md` that iteration 1's per-iteration
+    # consume would otherwise pick up.
+    if verify_first:
+        inject_pending = initial_inject_text is not None or (
+            plan_dir / _OPERATOR_INJECT_FILENAME
+        ).exists()
+        if not inject_pending:
+            entry_verify_fn = (
+                run_verify_fn if run_verify_fn is not None else _default_run_verify
+            )
+            entry_started_at = _now_iso_z()
+            # Same call seam the loop uses (run_verify_fn(plan_dir=,
+            # iteration_n=)); iteration_n=0 keeps the entry verify's
+            # `_test_output_iter0.txt` artifact distinct from the loop's
+            # iteration 1 output.
+            entry_result = entry_verify_fn(plan_dir=plan_dir, iteration_n=0)
+            if entry_result.returncode == 0:
+                ctx.iteration_n = 0
+                _emit_iteration_transition(
+                    ctx,
+                    transition_to="done",
+                    reason="entry verify PASSED (verify_first short-circuit)",
+                )
+                ctx.records.append(
+                    IterationRecord(
+                        iteration_n=0,
+                        started_at=entry_started_at,
+                        ended_at=_now_iso_z(),
+                        test_runner_exit_code=0,
+                        failing_tests=[],
+                        diff_excerpt="",
+                        rubric=None,
+                        cost_usd=0.0,
+                    )
+                )
+                return (
+                    IterationResult.PASSED,
+                    ctx.records,
+                    _sum_iteration_costs(ctx.records),
+                )
+            # RED entry (incl. UNTRUSTED-GREEN rc=13): discard the entry
+            # result and fall through to the legacy loop unchanged. The
+            # repair briefing's failure context is rubric-shaped
+            # (prior_diagnosis) — there is no clean seam to hand raw
+            # verify output to iteration 1, so iteration 1 re-runs the
+            # suite itself exactly as today.
+            ctx.iteration_n = 1
+
     last_result: IterationResult = IterationResult.HALT_CAP_EXHAUSTED
     for iter_n in range(1, effective_max + 1):
         ctx.iteration_n = iter_n
