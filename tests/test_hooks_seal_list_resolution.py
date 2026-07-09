@@ -24,6 +24,7 @@ once, so the mistake cannot be repeated per-module.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -139,7 +140,18 @@ def test_a_guard_invoked_from_a_foreign_cwd_still_finds_its_inventory(
         capture_output=True,
         text=True,
         cwd=str(tmp_path),
-        env={"PYTHONPATH": str(plugin_root()), "PATH": "/usr/bin:/bin"},
+        env={
+            "PYTHONPATH": str(plugin_root()),
+            "PATH": "/usr/bin:/bin",
+            # A minimal env drops the session-wide log-root redirect, and the
+            # hook's forensic `_hook_log` call would then append test rows to the
+            # operator's real ~/.claude/logs/. Carry it through explicitly.
+            **{
+                k: os.environ[k]
+                for k in ("HOOK_LOG_ROOT", "CLI_LOG_ROOT")
+                if k in os.environ
+            },
+        },
     )
     assert _is_deny(result.stdout), f"failed open from {tmp_path}: {result.stdout!r}"
 

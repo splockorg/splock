@@ -49,6 +49,13 @@ HOOKS_JSON = REPO_ROOT / "hooks" / "hooks.json"
 SEALED_PATHS_TXT = REPO_ROOT / "hooks" / "sealed_paths.txt"
 CLI_VERSION_DOC = REPO_ROOT / "docs" / "CLI_VERSION.md"
 
+#: Snapshot of the operator's real plugin registry, taken before any test runs.
+#: The CLI round-trip below asserts it is byte-for-byte untouched afterwards.
+_REAL_REGISTRY = Path.home() / ".claude" / "plugins" / "known_marketplaces.json"
+_REAL_REGISTRY_MTIME_AT_IMPORT = (
+    _REAL_REGISTRY.stat().st_mtime if _REAL_REGISTRY.is_file() else None
+)
+
 # Personal-identity tokens that MUST NOT appear in git history (or anywhere).
 FORBIDDEN_IDENTITY = (
     "bill@adknown.com",
@@ -178,21 +185,51 @@ def test_marketplace_consumer_roundtrip_when_cli_present(tmp_path) -> None:
     """End-to-end consumer round-trip via the real CLI, when available.
 
     Adds this repo as a self-hosted marketplace, installs the plugin from it,
-    then UNINSTALLS + REMOVES so the consumer's user settings are left clean.
-    Skipped when the CLI is not installed.
+    then UNINSTALLS + REMOVES. Skipped when the CLI is not installed.
+
+    ISOLATION IS LOAD-BEARING. `claude plugin` writes to the CONFIG DIR, not to
+    cwd, so the original `cwd=tmp_path` isolated nothing: this test added a
+    marketplace named `splock` to the operator's real registry, installed over
+    their real plugin, and then — in `finally` — ran
+    `marketplace remove splock`, deleting their actual installation. It shares
+    the name, so teardown could not tell them apart. Two operators lost their
+    splock install to this before anyone noticed, because the test PASSES either
+    way: it asserts on the CLI's exit codes, never on whose registry it mutated.
+
+    `CLAUDE_CONFIG_DIR` (plus `HOME`, belt and braces) points the CLI at a
+    throwaway registry under `tmp_path`. The assertions below prove the
+    isolation held, not merely that the commands exited 0.
     """
     cli = _claude_cli()
     if cli is None:
         pytest.skip("claude CLI not on PATH; see structural self-hosted check above")
 
+    fake_home = tmp_path / "home"
+    config_dir = fake_home / ".claude"
+    config_dir.mkdir(parents=True)
+
+    env = {
+        **os.environ,
+        "HOME": str(fake_home),
+        "CLAUDE_CONFIG_DIR": str(config_dir),
+    }
+
     def _run(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             [cli, "plugin", *args],
             cwd=str(tmp_path),
+            env=env,
             capture_output=True,
             text=True,
             timeout=60,
         )
+
+    # Nothing of the operator's may be visible from inside the sandbox.
+    listed = _run("marketplace", "list")
+    assert "splock" not in listed.stdout, (
+        "the sandboxed registry can see the operator's marketplaces; "
+        f"CLAUDE_CONFIG_DIR is not being honoured:\n{listed.stdout}"
+    )
 
     added = _run("marketplace", "add", str(REPO_ROOT))
     try:
@@ -203,10 +240,18 @@ def test_marketplace_consumer_roundtrip_when_cli_present(tmp_path) -> None:
         assert installed.returncode == 0, (
             f"install failed:\n{installed.stdout}\n{installed.stderr}"
         )
+        # The round-trip landed in the SANDBOX...
+        assert any(config_dir.rglob("*.json")), "sandbox registry was never written"
     finally:
-        # Best-effort teardown so the host's user settings are restored.
         _run("uninstall", "splock@splock")
         _run("marketplace", "remove", "splock")
+
+    # ...and never in the operator's real one.
+    if _REAL_REGISTRY_MTIME_AT_IMPORT is not None:
+        assert _REAL_REGISTRY.stat().st_mtime == _REAL_REGISTRY_MTIME_AT_IMPORT, (
+            "this test mutated the operator's real plugin registry "
+            f"({_REAL_REGISTRY})"
+        )
 
 
 # ---------------------------------------------------------------------------
