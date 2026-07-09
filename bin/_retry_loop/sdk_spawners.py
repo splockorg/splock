@@ -319,9 +319,12 @@ import importlib
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
-from typing import Any, AsyncIterator, Protocol
+from typing import Any, AsyncIterator, Iterable, Protocol
+
+from bin._verify_plan.strict import TYPED_GATE_COMMAND_PREFIX
 
 from .rubric import TEST_STEP_RUBRIC_SCHEMA_V1
 
@@ -449,6 +452,148 @@ _TEST_OUTPUT_FILENAME_TEMPLATE = "_test_output_iter{n}.txt"
 #: ``bin/_retry_loop/iteration_loop.py`` so callers see equivalent
 #: behaviour after T8 swaps the spawner.
 _PYTEST_SUBPROCESS_TIMEOUT_S = 1800
+
+#: Subprocess timeout for a typed gate command (mirrors the pytest run
+#: ceiling — gate commands may do real work, e.g. ``claude plugin
+#: validate .``).
+_TYPED_GATE_COMMAND_TIMEOUT_S = _PYTEST_SUBPROCESS_TIMEOUT_S
+
+COLLECT_TYPED_COMMAND = "typed_gate_command"
+"""Entry starts with ``TYPED_GATE_COMMAND_PREFIX`` (imported from
+``bin._verify_plan.strict`` — single source). Bypasses pytest entirely;
+no collect probe.
+
+The prefix is RESERVED, recognition-only defense-in-depth.
+`run_typed_gate_command` is an unwired utility — no gate verdict path
+executes it. Plan authors must not author ``gate_cmd:`` entries; the
+supported convention for non-pytest tasks is ``tests_enabled: []`` plus
+the ``verification_kind:`` test_plan exemption marker."""
+
+
+def _repo_root() -> pathlib.Path:
+    """The ADOPTER project's root — where its tests actually live.
+
+    Upstream this walked ``parents[2]`` off ``__file__``. Under an installed
+    plugin that is the plugin cache, so the on-disk selector check below and
+    pytest's ``cwd`` would both resolve against the wrong tree (fork finding
+    F3; same adopter-root class as F2 / OI-1). ``project_root()``'s in-tree
+    fallback is byte-identical to the old ``parents[2]``, so this is a strict
+    superset of the previous behaviour.
+
+    Kept as a module-level function (rather than inlining ``project_root``) so
+    tests can monkeypatch it and the selector check and pytest ``cwd`` always
+    agree.
+    """
+    from bin._env_paths import project_root
+
+    return project_root()
+
+
+def read_tests_enabled_union(orchestrator_path: pathlib.Path) -> list[str]:
+    """Deduplicated, sorted union of ``tasks[*].tests_enabled`` strings.
+
+    Single source of truth for "what the retry loop grades against",
+    shared by `run_verify_subprocess` and the `main._run_test_step`
+    pre-flight guard so the two never disagree on the candidate set.
+    """
+    payload = json.loads(orchestrator_path.read_text(encoding="utf-8"))
+    union: set[str] = set()
+    for task in payload.get("tasks", []) or []:
+        for test_id in task.get("tests_enabled", []) or []:
+            if isinstance(test_id, str) and test_id:
+                union.add(test_id)
+    return sorted(union)
+
+
+def is_runnable_pytest_selector(
+    selector: str, repo_root: pathlib.Path | None = None
+) -> bool:
+    """True iff ``selector`` is a pytest node-ID/path that exists on disk.
+
+    A runnable selector's path component (the part before any ``::``)
+    must (a) be non-empty, (b) contain no whitespace — pytest node-ID
+    *paths* never do, whereas design-prose entries like ``"CLI-version
+    doc"`` or ``"claude plugin validate . clean"`` always do — and
+    (c) resolve to a file or directory under ``repo_root`` (pytest's
+    ``cwd``).
+
+    This is the single guard that collapses two failure modes: a
+    syntactically-valid node-ID for a file a not-yet-``done`` task hasn't
+    created (→ pytest exits at collection), and a prose description splatted
+    at pytest (→ same). A not-yet-authored file simply isn't on disk yet, and
+    prose never looks like a path. Whitespace is checked only on the path
+    component so parametrised node-IDs whose ``[param-id]`` contains spaces
+    are not misclassified.
+    """
+    if repo_root is None:
+        repo_root = _repo_root()
+    path_part = selector.split("::", 1)[0].strip()
+    if not path_part or any(ch.isspace() for ch in path_part):
+        return False
+    candidate = repo_root / path_part
+    return candidate.is_file() or candidate.is_dir()
+
+
+def partition_runnable_selectors(
+    entries: Iterable[str], repo_root: pathlib.Path | None = None
+) -> tuple[list[str], list[str]]:
+    """Split ``entries`` into ``(runnable, skipped)`` pytest selectors.
+
+    ``runnable`` preserves input order and feeds the pytest argv;
+    ``skipped`` carries the non-selector / not-on-disk entries so callers
+    can surface them in an operator-facing diagnostic instead of letting
+    pytest exit 4 at collection (and burning the retry budget chasing an
+    unfixable invocation). See `is_runnable_pytest_selector`.
+    """
+    if repo_root is None:
+        repo_root = _repo_root()
+    runnable: list[str] = []
+    skipped: list[str] = []
+    for entry in entries:
+        target = runnable if is_runnable_pytest_selector(entry, repo_root) else skipped
+        target.append(entry)
+    return runnable, skipped
+
+
+def run_typed_gate_command(
+    entry: str,
+    cwd: pathlib.Path | None = None,
+    timeout_s: int = _TYPED_GATE_COMMAND_TIMEOUT_S,
+) -> subprocess.CompletedProcess:
+    """Run a typed gate command; exit-0 = pass (the Aider --test-cmd model).
+
+    ``entry`` must start with ``TYPED_GATE_COMMAND_PREFIX`` (imported, not
+    re-declared). The remainder is the command, split via ``shlex`` (no
+    shell) and run from the repo root (or ``cwd``). The raw
+    ``CompletedProcess`` is returned uncoerced — callers grade
+    ``returncode == 0`` as pass, anything else as failure. NEVER piped
+    through pytest.
+
+    DELIBERATELY NOT WIRED into any gate verdict path. It is retained as a
+    dormant, tested utility so the single-source prefix convention stays
+    parked for a future slug that demonstrates real generalization demand.
+    The supported convention for tasks with no pytest-expressible acceptance
+    is ``tests_enabled: []`` + the ``verification_kind:`` test_plan marker
+    (`bin._verify_plan.strict.VERIFICATION_KIND_MARKER_PREFIX`).
+    """
+    if not entry.startswith(TYPED_GATE_COMMAND_PREFIX):
+        raise ValueError(
+            f"not a typed gate command (missing "
+            f"'{TYPED_GATE_COMMAND_PREFIX}' prefix): {entry!r}"
+        )
+    command = entry[len(TYPED_GATE_COMMAND_PREFIX):].strip()
+    if not command:
+        raise ValueError(f"typed gate command is empty: {entry!r}")
+    if cwd is None:
+        cwd = _repo_root()
+    return subprocess.run(
+        shlex.split(command),
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        timeout=timeout_s,
+        check=False,
+    )
 
 
 def run_verify_subprocess(
