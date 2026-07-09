@@ -96,10 +96,22 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.strict:
         # Import here to avoid circular-import risk.
-        from bin._verify_plan.strict import run_strict_invariants
+        from bin._verify_plan.strict import (
+            TestsEnabledContractError,
+            run_strict_invariants,
+        )
 
         try:
             run_strict_invariants(plan, paths.kind, paths.json_path)
+        except TestsEnabledContractError as exc:
+            # real_tests_at_junctions SC2: tests_enabled contract defects
+            # (prose entries / phantom selectors) carry the DISTINCT
+            # plan-defect code so chain-overnight maps them to their own
+            # verdict instead of collapsing into the generic
+            # schema-rejection family (4 → 16). Subclass of
+            # SchemaRejectedError, so this branch MUST come first.
+            _emit_stderr_json(exc.as_stderr_payload())
+            return exit_codes.EXIT_TESTS_ENABLED_REJECTED
         except SchemaRejectedError as exc:
             _emit_stderr_json(exc.as_stderr_payload())
             return exit_codes.EXIT_SCHEMA_REJECTED

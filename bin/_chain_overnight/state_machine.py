@@ -42,6 +42,8 @@ from typing import Any
 
 from bin._jsonl_log import append_row
 
+from . import exit_codes
+
 logger = logging.getLogger(__name__)
 
 
@@ -167,6 +169,7 @@ def emit_phase_boundary(
     - wall_clock_exceeded → wip → blocked
     - concurrent_chain_refused → wip → blocked
     - verify_plan_rejected → wip → blocked
+    - tests_enabled_rejected → wip → blocked
     - retry_exceeded → wip → deferred
     - phase_boundary_halt → wip → blocked
     - sealed_path_refused → wip → blocked
@@ -347,6 +350,7 @@ _VERDICT_STATUS: dict[str, str] = {
     "wall_clock_exceeded": "blocked",
     "concurrent_chain_refused": "blocked",
     "verify_plan_rejected": "blocked",
+    "tests_enabled_rejected": "blocked",
     "retry_exceeded": "deferred",
     "phase_boundary_halt": "blocked",
     "sealed_path_refused": "blocked",
@@ -372,6 +376,7 @@ _HALT_REASON_STATUS: dict[str, str] = {
     "driver_crash": "blocked",
     "plan_schema_rejection": "blocked",
     "verify_plan_rejected": "blocked",
+    "tests_enabled_rejected": "blocked",
     "concurrent_chain_refused": "blocked",
     "concurrent_chain_foreign": "blocked",
     "sealed_path_refused": "blocked",
@@ -382,6 +387,28 @@ _HALT_REASON_STATUS: dict[str, str] = {
 def _map_halt_reason_to_status(halt_reason: str) -> str:
     """Closed-enum mapping; unknowns default to `blocked`."""
     return _HALT_REASON_STATUS.get(halt_reason, "blocked")
+
+
+def verdict_for_verify_plan_exit(downstream_exit: int) -> str:
+    """Map a `bin/verify_plan --strict` downstream exit code to a verdict.
+
+    Per real_tests_at_junctions SC2 (T3): the tests_enabled plan-defect
+    code (`exit_codes.EXIT_TESTS_ENABLED_REJECTED` = 44, propagated
+    verbatim per `exit_codes.PROPAGATED_FROM_VERIFY_PLAN`) maps to its
+    OWN verdict — `tests_enabled_rejected` — instead of collapsing
+    silently into the generic `verify_plan_rejected` family the way
+    render-plan exits 3/4/5/6/11 do. Both verdicts land on 7-status
+    `blocked`; the distinct verdict string is what surfaces the
+    "fix the plan authoring" triage signal in the boundary row.
+
+    This is the verdict seam for `phase_spawn.spawn_planner_phase`'s
+    verify branch (which today hardcodes `verify_plan_rejected`); the
+    chain-side wiring threads the `downstream_exit_code` it already
+    captures through this helper.
+    """
+    if downstream_exit == exit_codes.EXIT_TESTS_ENABLED_REJECTED:
+        return "tests_enabled_rejected"
+    return "verify_plan_rejected"
 
 
 __all__ = [
@@ -398,4 +425,5 @@ __all__ = [
     "emit_release_lock",
     "emit_sealed_path_refused",
     "emit_transition",
+    "verdict_for_verify_plan_exit",
 ]
