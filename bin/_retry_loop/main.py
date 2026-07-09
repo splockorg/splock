@@ -26,6 +26,14 @@ Subcommands
   data and on-disk artifacts; NEVER from agent narrative. This is the
   surface that `bin/build_briefing` POSIX wrapper invokes.
 
+- ``junction <slug> --junction <J-id>`` — junction-time collect-check
+  (real_tests_at_junctions SC4): consolidates the junction's covering
+  set (SC6 ``covers[]`` / default), classifies every covered
+  ``tests_enabled`` entry via the ``pytest --collect-only`` oracle
+  (typed gate commands recognized), prints the structured verdict as
+  JSON. Exit 0 = advance-ok; exit 10 (`EXIT_PHASE_BOUNDARY_HALT`) =
+  refuse advance (empty union or non-collectable entries).
+
 POSIX wrapper compatibility
 ---------------------------
 
@@ -133,6 +141,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Output file. Default: stdout.",
     )
 
+    # junction subcommand — real_tests_at_junctions SC4 junction-time hook.
+    sp_junction = sub.add_parser(
+        "junction",
+        help=(
+            "Collect-check a junction's covering set before advance "
+            "(real_tests_at_junctions SC4): unions the covered tasks' "
+            "tests_enabled, probes selectors via `pytest --collect-only` "
+            "(typed gate_cmd: entries recognized, not probed), prints a "
+            "JSON verdict. Exit 0 = advance-ok; exit 10 "
+            "(EXIT_PHASE_BOUNDARY_HALT) = refuse advance (empty union or "
+            "non-collectable entries); exit 1 = usage (unknown "
+            "slug/junction, malformed orchestrator)."
+        ),
+    )
+    sp_junction.add_argument("slug", help="Plan slug.")
+    sp_junction.add_argument(
+        "--junction",
+        required=True,
+        help="Junction id from the orchestrator's junctions[] (e.g. "
+             "J1_test_gate_...).",
+    )
+
     return p
 
 
@@ -149,7 +179,7 @@ def _split_argv_for_phase_spawn(argv: list[str]) -> tuple[bool, dict[str, str]]:
     if not argv:
         return False, {}
     leading = argv[0]
-    if leading in ("test-step", "boundary", "build-briefing"):
+    if leading in ("test-step", "boundary", "build-briefing", "junction"):
         return False, {}
     if leading.startswith("-"):
         return False, {}
@@ -194,7 +224,10 @@ def main(argv: list[str] | None = None) -> int:
         return exit_codes.EXIT_USAGE if exc.code != 0 else exit_codes.EXIT_OK
 
     if args.subcommand is None:
-        p.error("subcommand required (test-step | boundary | build-briefing)")
+        p.error(
+            "subcommand required (test-step | boundary | build-briefing | "
+            "junction)"
+        )
         return exit_codes.EXIT_USAGE
 
     if args.subcommand == "test-step":
@@ -203,6 +236,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_boundary(args)
     if args.subcommand == "build-briefing":
         return _run_build_briefing(args)
+    if args.subcommand == "junction":
+        return _run_junction(args)
     p.error(f"unknown subcommand: {args.subcommand!r}")
     return exit_codes.EXIT_USAGE
 
@@ -291,6 +326,96 @@ def _run_test_step(args: argparse.Namespace) -> int:
     except _UsageError:
         return exit_codes.EXIT_USAGE
 
+    # Pre-flight: refuse fast if the slug's tests_enabled union has no
+    # runnable pytest selectors (every entry is design-prose or names a
+    # file not yet on disk). Without this guard the loop splats the prose
+    # at pytest → exit 4 at collection → 3 Opus iterations of wheel-spin →
+    # exit 17 + a spurious ~160 KB halt entry, burning the full retry
+    # budget on a structurally-knowable refusal. Mirrors the SDK-smoke
+    # short-circuit below; runs before any SDK load or coder spawn so no
+    # budget is consumed. The helpers are SDK-free. See outstanding-issues
+    # #11 / #12.
+    from bin._retry_loop.sdk_spawners import (
+        partition_runnable_selectors,
+        read_tests_enabled_union,
+    )
+
+    try:
+        _union = read_tests_enabled_union(
+            plan_dir / f"{args.slug}_orchestrator.json"
+        )
+        _runnable, _skipped = partition_runnable_selectors(_union)
+        _preflight_blocks = not _runnable
+    except Exception:  # noqa: BLE001 — best-effort: on any read/parse
+        # failure fall through to the normal loop (which has its own
+        # ValueError / driver-crash handling). Never mask a different
+        # failure as "no runnable tests".
+        _preflight_blocks = False
+        _runnable = []
+        _skipped = []
+
+    if _preflight_blocks:
+        _emit_stderr_json(
+            {
+                "error": "no_runnable_tests",
+                "slug": args.slug,
+                "skipped": _skipped,
+                "hint": (
+                    "tests_enabled contains no runnable pytest selectors "
+                    "(node-IDs / paths that exist on disk). The listed "
+                    "entries are design-prose, non-pytest gates, or name "
+                    "files not yet authored. Build the slug and author its "
+                    "pytest files (or wire non-pytest checks as separate "
+                    "gate commands) before /test. Refused before spawning "
+                    "any coder — no retry budget consumed."
+                ),
+            }
+        )
+        return exit_codes.EXIT_USAGE
+
+    # real_tests_at_junctions T5 (SC4): collect-only oracle, layered
+    # AFTER the cheap shape/on-disk pre-flight above (the pre-flight
+    # stays first; the oracle adds collectability truth — plan SC4
+    # "pure upgrade" contract). A selector that passes shape but does
+    # NOT collect (`pytest --collect-only` exit 5, or a phantom node-ID
+    # inside an existing file) can never go green, so refuse loudly
+    # before spawning any coder — same posture and envelope shape as
+    # the no_runnable_tests refusal above. COLLECT_ERROR (import-broken
+    # module) deliberately passes through: that is a REAL failure
+    # surface the retry loop can iterate on.
+    from bin._retry_loop.sdk_spawners import (
+        COLLECT_NOT_COLLECTABLE,
+        collect_only_probe,
+    )
+
+    _not_collectable: list[str] = []
+    try:
+        for _sel in _runnable:
+            if collect_only_probe(_sel) == COLLECT_NOT_COLLECTABLE:
+                _not_collectable.append(_sel)
+    except Exception:  # noqa: BLE001 — best-effort symmetry with the
+        # union-read guard above: a probe crash (timeout, missing
+        # pytest) must never mask itself as "selector not collectable".
+        _not_collectable = []
+
+    if _not_collectable:
+        _emit_stderr_json(
+            {
+                "error": "not_collectable_tests",
+                "slug": args.slug,
+                "not_collectable": _not_collectable,
+                "hint": (
+                    "tests_enabled entries pass the shape/on-disk "
+                    "pre-flight but `pytest --collect-only` collects "
+                    "nothing for them (exit 5 / unrecognized node-ID). "
+                    "These selectors can never pass — fix the node-ID or "
+                    "author the missing test before /test. Refused before "
+                    "spawning any coder — no retry budget consumed."
+                ),
+            }
+        )
+        return exit_codes.EXIT_USAGE
+
     # Lazy-import: the SDK + the adapter factory both touch
     # claude_agent_sdk indirectly. Keep the imports inside the function
     # so this module loads cleanly in environments without the SDK
@@ -344,6 +469,12 @@ def _run_test_step(args: argparse.Namespace) -> int:
                 spawn_opus_fn=_opus_adapter,
                 run_verify_fn=_verify_adapter,
                 spawn_reviewer_fn=_reviewer_adapter,
+                # Verify-first reorder (real_tests_at_junctions
+                # follow-up, 2026-06-10): the operator-direct test-step
+                # entry is structurally the same phase-5 context as the
+                # chain driver's /test dispatch — a green suite returns
+                # PASSED without spawning an idle repair coder.
+                verify_first=True,
             )
     except ReviewerEmissionExhausted as exc:
         # Reviewer SDK retry exhaustion → exit 16. Mirrors the chain
@@ -407,13 +538,50 @@ def _run_boundary(args: argparse.Namespace) -> int:
     except _UsageError:
         return exit_codes.EXIT_USAGE
 
+    # Operator-direct reviewer wiring (2026-06-10). Mirrors
+    # _run_test_step: without an injected spawn_reviewer_fn,
+    # run_boundary_review falls back to
+    # iteration_loop._default_spawn_reviewer — a placeholder that HALTs
+    # every operator-direct `bin/verify boundary` run (exit 10) without
+    # ever spawning a reviewer. The chain has no separate boundary
+    # driver (phase_spawn dispatches phases 2-5 only), so this CLI is
+    # the sole boundary entry point and must carry real wiring.
+    from bin._retry_loop.opus_adapter import build_adapters, hook_env_staged
+    from bin._retry_loop.sdk_spawners import (
+        ReviewerEmissionExhausted,
+        smoke_check_sdk_available,
+    )
+
+    sdk_ok, sdk_msg = smoke_check_sdk_available()
+    if not sdk_ok:
+        _emit_stderr_json({"error": "sdk_smoke_failed", "detail": sdk_msg})
+        return exit_codes.EXIT_VERIFY_PLAN_REJECTED
+
     try:
-        verdict = phase_boundary_review.run_boundary_review(
-            plan_dir,
-            slug=args.slug,
-            chain_id=args.chain_id,
-            boundary=args.boundary,
+        # phase=6 per the chain comment at phase_spawn.py ("phase 4 →
+        # phase 5 → phase-6 boundary review"); only the reviewer
+        # adapter is consumed — boundary reviews spawn no coder.
+        with hook_env_staged(slug=args.slug, chain_id=args.chain_id, phase=6):
+            _o, _v, _reviewer_adapter = build_adapters(
+                slug=args.slug,
+                chain_id=args.chain_id,
+                phase=6,
+            )
+            verdict = phase_boundary_review.run_boundary_review(
+                plan_dir,
+                slug=args.slug,
+                chain_id=args.chain_id,
+                boundary=args.boundary,
+                spawn_reviewer_fn=_reviewer_adapter,
+            )
+    except ReviewerEmissionExhausted as exc:
+        _emit_stderr_json(
+            {
+                "error": "reviewer_emission_exhausted",
+                "subtype": getattr(exc, "subtype", "(no subtype)"),
+            }
         )
+        return exit_codes.EXIT_VERIFY_PLAN_REJECTED
     except rubric_mod.UnsupportedRubricVersionError as exc:
         _emit_stderr_json(
             {
@@ -475,6 +643,67 @@ def _run_build_briefing(args: argparse.Namespace) -> int:
     else:
         print(prompt)
     return exit_codes.EXIT_OK
+
+
+def _run_junction(args: argparse.Namespace) -> int:
+    """Run the junction-time collect-check (real_tests_at_junctions SC4).
+
+    Operator-direct surface: ``bin/verify junction <slug> --junction
+    <J-id>``. The /code step-6.1 junction-halt notice for ``test_gate``
+    junctions points the operator here before/with ``/test``.
+
+    Exit-code convention (documented in the subparser help text):
+
+    - 0 (`EXIT_OK`) — advance-ok: the covering set's consolidated
+      ``tests_enabled`` union is non-empty and every entry is a
+      collectable pytest selector or a recognized typed gate command.
+    - 10 (`EXIT_PHASE_BOUNDARY_HALT`) — refuse advance: empty union or
+      non-collectable entries. Reuses the §F gate-HALT slot — a junction
+      test_gate refusing advance is structurally the same operator
+      signal as a phase-boundary HALT.
+    - 1 (`EXIT_USAGE`) — unknown slug/junction id, malformed
+      orchestrator, or covering-set resolution failure.
+    - 2 (`EXIT_DRIVER_CRASH`) — unexpected exception.
+
+    The structured verdict prints to stdout as JSON either way so the
+    operator (or a driver) can read `entries[].classification` per
+    selector.
+    """
+    try:
+        plan_dir = _resolve_plan_dir(args.slug)
+    except _UsageError:
+        return exit_codes.EXIT_USAGE
+
+    # SDK-free imports — the junction hook never spawns an agent.
+    from bin._orchestrator_query.orchestrator_loader import (
+        OrchestratorJsonMalformedError,
+        OrchestratorJsonMissingError,
+        SlugNotFoundError,
+    )
+    from bin._retry_loop.sdk_spawners import junction_collect_check
+
+    try:
+        verdict = junction_collect_check(
+            plan_dir, slug=args.slug, junction_id=args.junction
+        )
+    except (
+        ValueError,
+        KeyError,
+        FileNotFoundError,
+        SlugNotFoundError,
+        OrchestratorJsonMissingError,
+        OrchestratorJsonMalformedError,
+    ) as exc:
+        _emit_stderr_json({"error": "usage", "detail": str(exc)})
+        return exit_codes.EXIT_USAGE
+    except Exception as exc:  # noqa: BLE001
+        _emit_stderr_json({"error": "driver_crash", "detail": str(exc)})
+        return exit_codes.EXIT_DRIVER_CRASH
+
+    print(json.dumps(verdict, indent=2, sort_keys=True))
+    if verdict["advance_ok"]:
+        return exit_codes.EXIT_OK
+    return exit_codes.EXIT_PHASE_BOUNDARY_HALT
 
 
 # ----------------------------------------------------------------------

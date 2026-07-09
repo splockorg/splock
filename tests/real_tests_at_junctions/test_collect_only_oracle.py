@@ -77,21 +77,6 @@ from bin._verify_plan.strict import TYPED_GATE_COMMAND_PREFIX
 _SLUG = "real_tests_at_junctions"
 _J1 = "J1_test_gate_validator_oracle_core_T1_T5"
 
-#: The oracle itself is here; its two CLI seams are not. `main._run_test_step`'s
-#: pre-flight refusal and the `bin/verify junction` subcommand land with the
-#: briefing/main/iteration_loop slice — un-skip these there.
-#:
-#: `test_cli_unknown_junction_exits_usage` is skipped for a subtler reason: it
-#: would PASS today, but vacuously. `main.py` maps any argparse `SystemExit` to
-#: EXIT_USAGE, so the assertion is satisfied by argparse rejecting the whole
-#: `junction` subcommand — never by the unknown-junction-id path it names. A
-#: test that passes for the wrong reason is worse than one that is honestly
-#: skipped.
-_needs_junction_cli = pytest.mark.skip(
-    reason="main._run_test_step pre-flight / `bin/verify junction` land with the "
-    "briefing+main+iteration_loop slice of this backport"
-)
-
 
 # --------------------------------------------------------------------------- #
 # helpers                                                                      #
@@ -326,7 +311,6 @@ class TestOracleIsPureUpgrade:
         )
         assert probe_calls == [mod.name]
 
-    @_needs_junction_cli
     def test_preflight_refusal_fires_before_probe_in_main(
         self, tmp_path, monkeypatch, capsys
     ):
@@ -365,7 +349,6 @@ class TestOracleIsPureUpgrade:
         err = capsys.readouterr().err
         assert "no_runnable_tests" in err
 
-    @_needs_junction_cli
     def test_shape_valid_but_not_collectable_refuses_loudly_in_main(
         self, tmp_path, monkeypatch, capsys
     ):
@@ -620,7 +603,6 @@ class TestJunctionHookUsesCoveringSet:
                 plan_dir, slug=slug, junction_id="J9", repo_root=repo
             )
 
-    @_needs_junction_cli
     def test_cli_refuse_exits_phase_boundary_halt(
         self, tmp_path, monkeypatch, capsys
     ):
@@ -647,7 +629,6 @@ class TestJunctionHookUsesCoveringSet:
         assert payload["advance_ok"] is False
         assert payload["refusal_reason"] == "not_collectable_entries"
 
-    @_needs_junction_cli
     def test_cli_unknown_junction_exits_usage(self, tmp_path, monkeypatch):
         repo = self._repo_with_modules(tmp_path)
         monkeypatch.setattr(sdk_spawners, "_repo_root", lambda: repo)
