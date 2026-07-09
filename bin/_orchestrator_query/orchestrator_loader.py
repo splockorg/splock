@@ -6,8 +6,13 @@ the closed-enum exception family that `main.py` maps to exit codes
 10/11/12.
 
 The picker only needs the orchestrator's `tasks` array to compute the
-ready set; everything else (junctions, plan_ref, etc.) is opaque to the
-library. Returning the full dict keeps the surface symmetric with
+ready set. Junctions are no longer fully opaque to the library: since
+real_tests_at_junctions T4 (SC6) this module also owns
+`junction_covering_set`, the junction -> task binding helper that
+resolves which tasks' `tests_enabled` a junction test_gate
+consolidates (explicit `covers[]` verbatim, else the documented
+default). Everything else (plan_ref, etc.) remains opaque. Returning
+the full dict keeps the surface symmetric with
 `state_loader.load_state` and leaves room for future fields without
 re-touching this module.
 """
@@ -92,3 +97,70 @@ def load_orchestrator(plan_dir: Path, slug: str) -> dict:
         )
 
     return payload
+
+
+def junction_covering_set(orchestrator: dict, junction: dict) -> list[str]:
+    """Resolve which tasks' `tests_enabled` a junction consolidates (SC6).
+
+    The junction -> task binding contract (real_tests_at_junctions T4):
+
+    - Explicit ``covers[]`` wins verbatim (order preserved, no dedupe).
+      Every entry must reference an existing task id; a bogus entry
+      raises ``ValueError`` naming the junction and the bad id. An
+      explicitly-empty ``covers: []`` also raises — the schema rejects
+      it (``minItems: 1``) so a vacuous test_gate is never expressible;
+      omit the field to get the default.
+    - When ``covers[]`` is absent, the default is the plan's SC6 rule:
+      "a documented default of all prior tasks through after_task" —
+      i.e. the tasks-array-order prefix up to AND INCLUDING the task
+      whose id equals ``after_task``. An ``after_task`` that does not
+      resolve to a task id raises ``ValueError`` (upstream,
+      `bin/_verify_plan/strict.py::_check_junctions_after_task_resolves`
+      rejects that orchestrator at plan time).
+
+    This is the seam the junction-time collect-only oracle imports to
+    build the consolidated covering set before allowing advance: a
+    selector belonging to a task OUTSIDE this set must not satisfy the
+    gate.
+
+    Parameters
+    ----------
+    orchestrator:
+        Parsed orchestrator payload (e.g. from `load_orchestrator`);
+        only `tasks` is read.
+    junction:
+        One entry of the orchestrator's `junctions` array.
+
+    Returns
+    -------
+    list[str]
+        Task ids whose `tests_enabled` the junction consolidates.
+    """
+    j_id = junction.get("id", "<unknown>")
+    tasks = orchestrator.get("tasks", []) or []
+    task_ids = [task["id"] for task in tasks if "id" in task]
+
+    covers = junction.get("covers")
+    if covers is not None:
+        if not covers:
+            raise ValueError(
+                f"junction '{j_id}': explicit covers[] is empty — a vacuous "
+                f"covering set is schema-rejected (minItems 1); omit covers "
+                f"to get the default (all prior tasks through after_task)"
+            )
+        known = set(task_ids)
+        bogus = [tid for tid in covers if tid not in known]
+        if bogus:
+            raise ValueError(
+                f"junction '{j_id}': covers[] references unknown task id(s) "
+                f"{bogus} — every entry must be an existing task id"
+            )
+        return list(covers)
+
+    after = junction.get("after_task")
+    if after not in task_ids:
+        raise ValueError(
+            f"junction '{j_id}': after_task '{after}' does not resolve to a "
+            f"defined task id; cannot compute the default covering set"
+        )
+    return task_ids[: task_ids.index(after) + 1]
