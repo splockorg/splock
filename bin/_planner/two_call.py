@@ -62,22 +62,23 @@ from .prompt_templates import (
 # Model pinning — driver-side env-var default
 # ----------------------------------------------------------------------
 DEFAULT_PLANNER_MODEL = "claude-opus-4-8"
-"""Hardcoded fallback model id — the floor when no explicit pin is set and
-auto-latest discovery is unavailable.
+"""Default planner model — the concrete latest/best Opus, NOT the `opus` alias.
 
-Per claude-api skill (skill-validated 2026-05-21 per §D mid-section M-2):
-use the bare canonical model ID, never a date-suffixed variant. The skill
-explicitly says "Use only the exact model ID strings... they are complete
-as-is. Do not append date suffixes." Bare `claude-opus-4-8` is the
-canonical Opus 4.8 ID.
+Deliberately a CONCRETE version, not the `opus` family alias: on the subscription
+`claude` CLI the `opus` alias currently resolves to `claude-opus-4-7` (verified
+2026-06-24), which is STALE — Opus 4.7 systematically degenerated the
+late-alphabetical required array fields (`success_criteria`, `tasks_skeleton`)
+in Call 2's constrained-decoding emission (schema-valid-but-useless plans),
+which is exactly why this was pinned to 4.8 on 2026-05-29. Using the alias would
+silently regress the planner to that defect, so we pin the best concrete version.
 
-Bumped 4.7 → 4.8 (2026-05-29): Opus 4.7 systematically degenerated the
-late-alphabetical *required* array fields (`success_criteria`,
-`tasks_skeleton`) in Call 2's constrained-decoding emission — emitting
-single minimal stub items while richly filling the earlier fields —
-producing schema-valid-but-useless plans. Opus 4.8 emits them in full.
-See `_resolve_model_id` for the auto-latest-Opus resolution that keeps
-this from going stale again."""
+When a newer Opus ships, bump this one constant (the `claude` CLI accepts full
+ids verbatim, so `claude-opus-4-9` etc. will Just Work). An explicit
+`OVERNIGHT_CHAIN_PLANNER_MODEL` pin always wins. The concrete version the CLI
+resolved to is captured from the API response into `PlannerResult.call{1,2}_
+model_id` for forensic logging. (The old `models.list()` auto-latest discovery in
+`_resolve_model_id` no-ops on the subscription transport — see
+`bin/_sdk_bridge.py` — so this default is the operative model.)"""
 
 
 AUTO_LATEST_OPUS_ENV = "PLANNER_MODEL_AUTO_LATEST"
@@ -260,14 +261,25 @@ class AnthropicClient(Protocol):
 
 
 def _default_client() -> AnthropicClient:
-    """Construct the default `anthropic.Anthropic` client.
+    """Construct the default planner SDK client.
 
-    Imported lazily so the module imports cleanly when `anthropic` is
-    not installed (tests use a mock anyway).
+    Returns the subscription-billed transport bridge
+    (`bin._sdk_bridge.SubscriptionClient`), which routes every
+    `messages.create(...)` call through `claude_agent_sdk` → the operator's
+    local `claude` CLI subscription, instead of the legacy metered
+    `anthropic.Anthropic()` (which read `ANTHROPIC_API_KEY` from `.env` and
+    billed the metered API account). The bridge implements the same
+    `.messages.create(...)` protocol — including the Call-2 `output_config`
+    json-schema structured-emission path — so this function's callers and the
+    extraction helpers above are unchanged. Imported lazily so the module
+    imports cleanly when the SDK is not installed (tests inject a mock anyway).
+
+    `/plan` + `/implplan` are interactive code-authoring tools; subscription
+    billing is the correct account for them. See `bin/_sdk_bridge.py`.
     """
-    import anthropic  # type: ignore[import-untyped]
+    from bin._sdk_bridge import SubscriptionClient  # local — lazy-import
 
-    return anthropic.Anthropic()
+    return SubscriptionClient()
 
 
 # ----------------------------------------------------------------------

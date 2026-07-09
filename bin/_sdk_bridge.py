@@ -489,19 +489,42 @@ class SubscriptionClient:
         self._cwd = pathlib.Path(cwd) if cwd is not None else _repo_root()
         self.messages = _Messages(self)
 
+    @staticmethod
+    def _import_agent_sdk() -> Any:
+        """Import ``claude_agent_sdk``, or explain how to get it.
+
+        A bare ``ModuleNotFoundError`` surfaces at the FIRST model call — long
+        after ``bin/plan <slug>`` looked like it was working — and names a
+        package the operator never asked for. Since this transport is now the
+        default for the planner and qa, say what to install and where.
+
+        Catches ``ImportError`` rather than only ``ModuleNotFoundError``: a
+        half-installed SDK whose own imports fail deserves the same guidance,
+        and it is the exception a ``sys.modules[...] = None`` test stub raises.
+        """
+        try:
+            import claude_agent_sdk  # local — lazy-import discipline
+        except ImportError as exc:
+            raise RuntimeError(
+                "claude_agent_sdk could not be imported, and it is required: "
+                "it is the transport that bills model calls to your `claude` "
+                "CLI subscription rather than a metered ANTHROPIC_API_KEY. "
+                "Install it into the venv splock activates ($SPLOCK_VENV, "
+                "else ./.venv):\n"
+                "    pip install -r requirements-sdk.txt\n"
+                "See bin/_sdk_bridge.py and ADOPTION.md."
+            ) from exc
+        return claude_agent_sdk
+
     def _query_fn(self) -> Callable[..., Any]:
         if self._injected_query_fn is not None:
             return self._injected_query_fn
-        import claude_agent_sdk  # local — lazy-import discipline
-
-        return claude_agent_sdk.query
+        return self._import_agent_sdk().query
 
     def _options_cls(self) -> Callable[..., Any]:
         if self._injected_options_cls is not None:
             return self._injected_options_cls
-        from claude_agent_sdk import ClaudeAgentOptions  # local — lazy-import
-
-        return ClaudeAgentOptions
+        return self._import_agent_sdk().ClaudeAgentOptions
 
 
 __all__ = ["SubscriptionClient"]
