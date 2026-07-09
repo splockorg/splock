@@ -7,6 +7,8 @@
 #   anthropic        -> bin/plan, bin/implplan   (two-call planner SDK calls)
 #   claude-agent-sdk -> bin/verify test-step      (Sonnet reviewer spawn in
 #                                                   the §F.3 retry loop)
+#                    -> bin/qa                    (subscription-billed transport
+#                                                   via bin/_sdk_bridge.py)
 #
 # Install into the venv splock activates ($SPLOCK_VENV, else ./.venv):
 #
@@ -14,6 +16,6 @@
 #
 # Version floors match the contracts the code was verified against
 # (bin/_planner/two_call.py: anthropic 0.104.0;
-#  bin/_retry_loop/sdk_spawners.py: claude-agent-sdk 0.2.87).
+#  bin/_retry_loop/sdk_spawners.py, bin/_sdk_bridge.py: claude-agent-sdk 0.2.87).
 anthropic>=0.104.0
 claude-agent-sdk>=0.2.87

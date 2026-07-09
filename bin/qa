@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# bin/qa — operator-direct qa CLI (single-call adversarial review).
+#
+# Per plan §D.8.3. Thin POSIX wrapper around `bin/_qa/main.py qa`.
+# Activates the project venv if available so operator invocations from
+# outside PyCharm have the right interpreter.
+#
+# Usage:
+#   bin/qa <slug> [--subject=recon|qna|research|plan] [--repo-state=...]
+#                 [--directive=...] [--chain-id=...] [--stdout]
+#                 [--reopen] [--new-file]
+#
+# Exit codes per `bin/_qa/exit_codes.py`:
+#   0  = success (MD written to docs/plans/<slug>/<slug>_qa.md)
+#   1  = usage error
+#   7  = atomic write failed
+#   8  = target_exists_no_reopen (retained for cross-CLI parity; qa re-runs
+#        append by default and never raises it)
+#   17 = SDK call failed
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Preserve the invoking directory for bin/_env_paths.project_root():
+# the cd below moves to the plugin/checkout root, which in installed-
+# plugin mode is NOT the adopter repo the CLI must operate on.
+export SPLOCK_CALLER_PWD="${SPLOCK_CALLER_PWD:-$PWD}"
+cd "$REPO_ROOT"
+
+# Activate venv if present and not already active (idempotent).
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+exec "$(command -v python || command -v python3)" -m bin._qa.main qa "$@"
