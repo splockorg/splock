@@ -24,6 +24,19 @@ EXIT_TEMPLATE_ERROR = 6
 EXIT_ATOMIC_WRITE_FAILED = 7
 EXIT_DRIFT = 11
 
+# real_tests_at_junctions SC2 (T3): the orchestrator's tests_enabled
+# contract was violated (prose entry, or a phantom selector whose path
+# appears in no task's file_paths_touched). DISTINCT from
+# EXIT_SCHEMA_REJECTED so the chain driver does not collapse it into the
+# generic 16 `verify_plan_rejected` family — the operator signal is "the
+# plan emission is structurally defective at the tests_enabled level; fix
+# the plan authoring", not "schema parse problem". Mirrored verbatim in
+# `bin/_chain_overnight/exit_codes.py` (the cross-CLI shared registry)
+# with its own verdict mapping in `state_machine.py`. Allocated 44 as the
+# lowest slot free across the A.impl.3a registry (39 is §J
+# `failure_capture_idempotent_noop`; 43 is §D `amend_post_apply_invalid`).
+EXIT_TESTS_ENABLED_REJECTED = 44
+
 # Sealed-state path inventory extension (per §B.impl.10; §G.impl reads this
 # list when authoring the `chain-sealed-state-delete-block` PreToolUse hook):
 #   docs/plans/<slug>/<slug>_plan.json
@@ -41,5 +54,6 @@ ALL_CODES = frozenset(
         EXIT_TEMPLATE_ERROR,
         EXIT_ATOMIC_WRITE_FAILED,
         EXIT_DRIFT,
+        EXIT_TESTS_ENABLED_REJECTED,
     }
 )

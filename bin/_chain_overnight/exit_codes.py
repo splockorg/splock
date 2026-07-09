@@ -99,6 +99,24 @@ the live chain. Maps from `pause_sentinel.PauseAlreadyHeldError` at the
 CLI layer. CCOR.1-owned per R-exit-codes; non-idempotent by design —
 the second pause is an informative refusal, not silent noop."""
 
+EXIT_TESTS_ENABLED_REJECTED = 44
+"""§B's `bin/verify_plan --strict` rejected an orchestrator emission on
+tests_enabled-contract grounds (real_tests_at_junctions SC2): a
+`tasks[].tests_enabled` entry is prose (not a runnable pytest selector
+or typed gate command) or a phantom selector naming a path absent from
+every task's `file_paths_touched`. Propagated VERBATIM from
+`bin/_render_plan/exit_codes.EXIT_TESTS_ENABLED_REJECTED` (44 → 44, like
+the code-7 atomic-write family) instead of being collapsed into the
+generic 16 `verify_plan_rejected` consolidation — the operator triage
+signal is "fix the plan authoring (move prose to test_plan[], bind
+selectors to authored files)", which is actionable in a way the
+catch-all 16 is not. Also emitted by `bin/_planner/main.py` on the
+operator-direct /implplan emission seam (which chain mode does not
+traverse). Verdict mapping: `state_machine.verdict_for_verify_plan_exit`
+→ `tests_enabled_rejected` → 7-status `blocked`. Allocated 44 as the
+lowest slot free across the A.impl.3a registry (39 is §J
+`failure_capture_idempotent_noop`; 43 is §D `amend_post_apply_invalid`)."""
+
 
 # Aggregate set for caller-side membership checks. Codes here are the
 # §A-emit slot in the cross-CLI shared registry — codes that the chain
@@ -167,4 +185,9 @@ PROPAGATED_FROM_VERIFY_PLAN = {
     6: EXIT_VERIFY_PLAN_REJECTED,          # EXIT_TEMPLATE_ERROR
     7: EXIT_ATOMIC_WRITE_FAILED,           # EXIT_ATOMIC_WRITE_FAILED
     11: EXIT_VERIFY_PLAN_REJECTED,         # EXIT_DRIFT
+    # real_tests_at_junctions SC2: tests_enabled contract defect keeps its
+    # OWN code + verdict — deliberately NOT collapsed into the 16
+    # `verify_plan_rejected` family above (see EXIT_TESTS_ENABLED_REJECTED
+    # docstring + state_machine.verdict_for_verify_plan_exit).
+    44: EXIT_TESTS_ENABLED_REJECTED,       # EXIT_TESTS_ENABLED_REJECTED
 }
