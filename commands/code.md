@@ -242,7 +242,7 @@ WRAPPED_DIRECTIVE="$(bin/wrap --kind operator-directive --content "$directive")"
       | kind | Notice template |
       |---|---|
       | `phase_boundary` | `Phase boundary <J-id> reached after <T-id> — commit/checkpoint Phase N work before re-invoking /code <slug>` |
-      | `test_gate` | `Test gate <J-id> after <T-id> — run /test <slug> before re-invoking /code <slug>` |
+      | `test_gate` | `Test gate <J-id> after <T-id> — run bin/verify junction <slug> --junction <J-id> (collect-check on the covering set), then /test <slug> before re-invoking /code <slug>` |
       | `review_gate` | `Review gate <J-id> after <T-id> — operator review required before re-invoking /code <slug>` |
 
       Multiple junctions can fire on the same `after_task` (e.g., a

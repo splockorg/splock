@@ -80,6 +80,55 @@ evidence (Anthropic constitution + PCFI / Greshake / OWASP literature).
 This defense-in-depth posture mirrors §C.impl.7's reason-field delimiter
 contract (see `bin/_jsonl_log/delimiter.py`).
 
+## tests_enabled contract (implplan emission)
+
+Per `real_tests_at_junctions` SC1: when emitting an orchestrator, every
+task's `tests_enabled` entries are GATE INPUT, not design prose. The
+`bin/verify` test-step gate (and junction `test_gate`s) execute them
+literally; a prose entry can never run and silently weakens the gate.
+
+The contract for each `tests_enabled` entry:
+
+- It MUST be a **runnable pytest selector** —
+  `path/to/test_file.py` or `path/to/test_file.py::test_name` — whose
+  path component (the part before `::`) appears in the **same task's
+  `file_paths_touched`** (the task that names the test commits to
+  authoring its file; a selector pointing at a file no task authors is
+  a phantom selector).
+- The **typed gate command** shape (`gate_cmd:` prefix; exit 0 = pass)
+  is **RESERVED, not active** — do NOT author it. The T6/SC3 decision
+  narrowed it: the prefix is recognized by the validator (so it is not
+  graded as prose) but **nothing executes it** — an authored `gate_cmd:`
+  entry would satisfy junction resolvability without ever running.
+- **Prose descriptions of testing intent belong in that task's
+  `test_plan[]` entries, never in `tests_enabled`.** `test_plan[]` is
+  the structured home for narrative (`test_id` / `asserts` / `fixture`).
+- `tests_enabled: []` is allowed **only for pure bookkeeping/doc tasks**.
+  Such a task SHOULD declare WHY via a **`verification_kind:` exemption
+  marker** — a `test_plan[]` entry whose `test_id` starts with
+  `verification_kind:` (e.g. `verification_kind: artifact_review`), with
+  `asserts`/`fixture` describing the non-pytest verification (doc-review,
+  staged sealed-path bundle, verifier-recorded artifact). The plan-time
+  validator recognizes the marker and rejects a malformed (empty) kind
+  or a marker on a task that also carries `tests_enabled` entries.
+  Common kinds: `artifact_review`, `doc_review`, `operator_applied`.
+
+**Why this is written down (design-vs-GATE drift).** The historical
+drift was not sloppy authoring against a clear spec — the v2.7 design
+itself never specified a gate-runnable shape. Even its canonical example,
+`["test_users_endpoint", "test_users_list"]`, is bare function names that
+`pytest <entry>` cannot resolve; the shipped gate runs selectors, not
+names. So entries drifted to free prose and the permissive schema
+(`{"type": "array", "items": {"type": "string"}}`) passed them. This
+section pins the gate-runnable shape as the authored contract.
+
+This is the soft, LLM-dependent layer: the Call-1/Call-2 prompts embed
+the same contract (`TESTS_ENABLED_CONTRACT` in
+`bin/_planner/prompt_templates.py`). The deterministic twin is the
+plan-time validator (`real_tests_at_junctions` SC2) which rejects prose,
+phantom selectors, and malformed/contradictory exemption markers
+post-emission.
+
 ## Model pinning
 
 The planner uses the model resolved from `OVERNIGHT_CHAIN_PLANNER_MODEL`
@@ -132,4 +181,9 @@ re-do the recon/research input.
 - implplan §D.impl.7 — per-call budget cap enforcement
 - implplan §D.impl.8 — model pinning
 - `bin/_planner/two_call.py` — the structural enforcement code
+- `bin/_planner/prompt_templates.py` — `TESTS_ENABLED_CONTRACT` (the
+  tests_enabled authoring contract, real_tests_at_junctions SC1)
+- `bin/_verify_plan/strict.py` — `TYPED_GATE_COMMAND_PREFIX` (reserved)
+  + `VERIFICATION_KIND_MARKER_PREFIX` (the narrowed SC3 exemption
+  marker) + the SC2 plan-time validator
 - `schemas/plan_v1.schema.json` + `schemas/orchestrator_v1.schema.json` — the JSON Schemas

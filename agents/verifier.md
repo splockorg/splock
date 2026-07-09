@@ -7,15 +7,19 @@ model: claude-haiku-4-5-20251001
 
 # verifier subagent
 
-The Ralph completion gate. Consumes `tests_enabled` from `_state.json`
-AND the latest `verification.json` for the active task (per Hole H.19's
-structural tightening); answers `READY | NO | NEEDS_HUMAN`.
+The Ralph completion gate. Consumes `tests_enabled` from
+`<slug>_orchestrator.json` — the canonical source; `_state.json` is
+statuses-only and carries NO `tests_enabled` field (SC5 source-of-truth
+pin) — AND the latest `verification.json` for the active task (per Hole
+H.19's structural tightening); answers `READY | NO | NEEDS_HUMAN`.
 
 Per plan §D.8.7 + plan §A + Hole H.19.
 
 ## Scope
 
-- Read `_state.json` for the active task's `tests_enabled` set.
+- Read the active task's `tests_enabled` set from
+  `<slug>_orchestrator.json` `tasks[].tests_enabled` (canonical;
+  `_state.json` carries task statuses only).
 - Read the latest `verification.json` for the active task.
 - Run the verifier-internal smoke test (the canonical "is the system
   alive?" probe per §F.7) via `Bash`.

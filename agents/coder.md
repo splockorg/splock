@@ -17,7 +17,10 @@ Per plan §D.8.5 + v2.7 §1.D + §6.G.4.
 
 - Read the active task from `<slug>_orchestrator.json` (resolved by
   §A.impl `phase_spawn.py`).
-- Read `_state.json` for the task's `tests_enabled` set (per §D + Hole H.19).
+- Read the task's `tests_enabled` set from `<slug>_orchestrator.json`
+  `tasks[].tests_enabled` — the canonical source. `_state.json` is
+  statuses-only and carries NO `tests_enabled` field (per §D + Hole H.19
+  + the SC5 source-of-truth pin).
 - Implement code changes within `file_paths_touched`.
 - Run tests via `bin/verify` (POSIX wrapper around pytest).
 - Iterate per the test-step retry loop (§F.3) until tests pass OR the
