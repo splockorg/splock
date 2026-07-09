@@ -1251,6 +1251,45 @@ def main(argv: list[str] | None = None) -> int:
             # implplan path); no-op if the plan omits `phase`.
             _carry_forward_plan_phase(payload, inputs.prior_plan_json)
 
+    # real_tests_at_junctions SC2 (T3) — operator-direct /implplan coverage.
+    # Chain mode re-verifies every emission via `bin/verify_plan --strict`
+    # (phase_spawn.py), but this operator-direct CLI path historically wrote
+    # the orchestrator with NO strict validation at all (the recon-named
+    # coverage gap). Run the strict invariants on the emitted orchestrator
+    # BEFORE the stdout/write fork, so a tests_enabled contract violation
+    # (prose entry / phantom selector — the yaml_refactor failure class)
+    # fails LOUDLY with the distinct plan-defect code and never lands on
+    # disk. Reuses `run_strict_invariants` — single validator, no fork.
+    # Non-tests_enabled strict violations keep the prior operator-direct
+    # disposition (warn-only): making them newly fatal here is outside
+    # T3's scope, and chain mode still rejects them via verify_plan
+    # --strict.
+    if args.step == "implplan" and isinstance(payload, dict):
+        from bin._render_plan.exit_codes import EXIT_TESTS_ENABLED_REJECTED
+        from bin._render_plan.json_loader import SchemaRejectedError
+        from bin._verify_plan.strict import (
+            TestsEnabledContractError,
+            run_strict_invariants,
+        )
+
+        try:
+            run_strict_invariants(
+                payload,
+                "orchestrator",
+                _output_target(plan_dir, args.slug, args.step),
+            )
+        except TestsEnabledContractError as exc:
+            _emit_stderr_json(exc.as_stderr_payload())
+            return EXIT_TESTS_ENABLED_REJECTED
+        except SchemaRejectedError as exc:
+            print(
+                f"warning: strict invariants flagged the emitted "
+                f"orchestrator for {args.slug}: {exc} (operator-direct "
+                f"warn-only; chain mode rejects via bin/verify_plan "
+                f"--strict)",
+                file=sys.stderr,
+            )
+
     # Emit / write the result.
     if args.stdout:
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -1294,6 +1333,21 @@ def main(argv: list[str] | None = None) -> int:
             )
             return exit_codes.EXIT_USAGE
 
+    # real_tests_at_junctions SC7 (T7) — capture the pre-rewrite orchestrator
+    # bytes when an implplan run is about to OVERWRITE an existing
+    # <slug>_orchestrator.json (the --reopen regeneration path; the
+    # target-exists gate guarantees overwrites only happen under --reopen).
+    # The post-write re-validation below restores these bytes if the rewrite
+    # is rejected, so a rejected rewrite never leaves a contract-violating
+    # orchestrator on disk. Best-effort capture: a read failure leaves the
+    # rollback unavailable but never blocks the write.
+    _pre_rewrite_orch_bytes: bytes | None = None
+    if args.step == "implplan" and _target_existed_before:
+        try:
+            _pre_rewrite_orch_bytes = target.read_bytes()
+        except OSError:
+            _pre_rewrite_orch_bytes = None
+
     try:
         _write_output(target, payload)
     except Exception as exc:  # noqa: BLE001 — wrap any atomic-write failure
@@ -1301,6 +1355,54 @@ def main(argv: list[str] | None = None) -> int:
             {"error": "atomic_write_failed", "target": str(target), "detail": str(exc)}
         )
         return exit_codes.EXIT_ATOMIC_WRITE_FAILED
+
+    # real_tests_at_junctions SC7 (T7) — validator RE-ENTRY on orchestrator
+    # rewrite. The pre-write T3 seam above validated the IN-MEMORY payload;
+    # this re-validates the BYTES THAT ACTUALLY LANDED on disk (via the same
+    # public seam the operator /tmp re-serializer convention binds to —
+    # `bin/_verify_plan/strict.revalidate_orchestrator_file`), so no
+    # orchestrator rewrite through this CLI can leave a tests_enabled
+    # contract violation behind even if write-path divergence re-introduced
+    # one. Disposition mirrors the pre-write seam: a contract violation is
+    # FATAL (distinct exit 44) and the rewrite is undone (pre-rewrite bytes
+    # restored on --reopen; a fresh write is removed); any other
+    # re-validation failure (generic strict / JSON Schema) stays WARN-ONLY
+    # on this operator-direct path — chain mode still rejects those via
+    # `bin/verify_plan --strict`.
+    if args.step == "implplan":
+        from bin._render_plan.exit_codes import EXIT_TESTS_ENABLED_REJECTED
+        from bin._verify_plan.strict import (
+            TestsEnabledContractError,
+            revalidate_orchestrator_file,
+        )
+
+        try:
+            revalidate_orchestrator_file(target)
+        except TestsEnabledContractError as exc:
+            if _pre_rewrite_orch_bytes is not None:
+                _undone = _rollback_json(target, _pre_rewrite_orch_bytes)
+            else:
+                # Fresh write (no prior orchestrator): remove the rejected
+                # artifact so the failure mode matches the pre-write seam
+                # ("nothing lands on disk"). Best-effort.
+                try:
+                    target.unlink()
+                    _undone = True
+                except OSError:
+                    _undone = False
+            envelope = exc.as_stderr_payload()
+            envelope["reentry"] = "post_write_rewrite_revalidation"
+            envelope["rewrite_undone"] = _undone
+            _emit_stderr_json(envelope)
+            return EXIT_TESTS_ENABLED_REJECTED
+        except Exception as exc:  # noqa: BLE001 — warn-only generic re-validation
+            print(
+                f"warning: post-write re-validation flagged the written "
+                f"orchestrator for {args.slug}: {exc} (operator-direct "
+                f"warn-only; chain mode rejects via bin/verify_plan "
+                f"--strict)",
+                file=sys.stderr,
+            )
 
     # Per TA: surface a "Reopened: overwrote <abs-path>" stderr notice only
     # when an overwrite actually occurred (target existed pre-run AND we

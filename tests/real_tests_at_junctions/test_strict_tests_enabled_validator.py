@@ -338,15 +338,56 @@ def test_t3_verify_dispatch_returns_distinct_code(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# 8. T3 operator-direct coverage — DEFERRED                                    #
-#                                                                              #
-# Upstream this section pins that `bin/_planner/main.py`'s operator-direct     #
-# /implplan emission seam also runs the validator (not just chain mode), so a  #
-# prose-bearing Call-2 emission is rejected BEFORE the orchestrator lands on   #
-# disk. That planner integration is a separate slice of this backport and is   #
-# not present yet, so the test would be red for a reason unrelated to the      #
-# validator itself. It lands with the `_planner` merge.                        #
+# 8. T3-operator-direct-coverage                                               #
 # --------------------------------------------------------------------------- #
+
+
+def test_t3_operator_direct_coverage(tmp_path, monkeypatch, capsys):
+    """The operator-direct /implplan emission path in `bin/_planner/main.py`
+    invokes the validator (not only chain mode): a stubbed Call-2 emission
+    carrying a prose tests_enabled entry is rejected with the distinct
+    code BEFORE the orchestrator lands on disk."""
+    import bin._planner.main as planner_main
+    from bin._planner.two_call import PlannerResult
+
+    slug = "operator_direct_demo"
+    plan_dir = tmp_path / slug
+    plan_dir.mkdir()
+    # implplan requires the upstream plan substrate to exist.
+    (plan_dir / f"{slug}_plan.json").write_text("{}", encoding="utf-8")
+
+    prose_orchestrator = {
+        "schema_version": 1,
+        "slug": slug,
+        "tasks": [
+            _task("T1", ["src/mod.py"], [_PROSE_ENTRY]),
+        ],
+    }
+
+    def _stub_invoke_planner(**kwargs):
+        return PlannerResult(
+            call1_reasoning_md="(stubbed Call 1 reasoning)",
+            call2_emitted_json=prose_orchestrator,
+            call1_cost_usd=0.0,
+            call2_cost_usd=0.0,
+            call1_model_id="(stub)",
+            call2_model_id="(stub)",
+        )
+
+    monkeypatch.setattr(planner_main, "_PLANS_DIR", tmp_path)
+    monkeypatch.setattr(planner_main, "invoke_planner", _stub_invoke_planner)
+
+    rc = planner_main.main(["implplan", slug])
+
+    assert rc == render_exit_codes.EXIT_TESTS_ENABLED_REJECTED
+    # Emission failed loudly BEFORE the write: no orchestrator on disk.
+    assert not (plan_dir / f"{slug}_orchestrator.json").exists()
+    # And no MD twin / Call-1 reasoning side-effects either.
+    assert not (plan_dir / f"{slug}_orchestrator.md").exists()
+
+    err = capsys.readouterr().err
+    assert "tests_enabled_contract_rejected" in err
+    assert "T1" in err
 
 
 # --------------------------------------------------------------------------- #
