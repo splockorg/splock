@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# bin/log — structured-log emitter for non-hook CLI contexts.
+#
+# Per implplan §G.impl.11 (v1.4-revised-2 N#4 take-back). Sibling to
+# `bin/hook-log`; same underlying writer, distinct target file.
+#
+# CLI shape:
+#   bin/log <emitter> <action> "<message>"
+#
+# <emitter> must be a registered KNOWN_WRITERS value (e.g.,
+#   "bin/marker:validate", "bin/chain-overnight",
+#   "bin/route_issue:escalate"). Unknown emitter → exit 4.
+#
+# Action enum (closed): ok / blocked / flagged / error
+#
+# Output: appends one JSON line to
+#   ~/.claude/logs/cli-<YYYY-MM-DD>.jsonl
+# Per-user, per-day rotation; structurally distinct from hooks-<date>.jsonl
+# so `jq` over hook logs doesn't pull in CLI rows.
+#
+# Exit codes:
+#   0 = accepted
+#   1 = usage error
+#   4 = rejected (action not in enum, emitter not in KNOWN_WRITERS)
+#
+# Per plan §N.2 requirement C: CLIs emit structured logs via
+# `bin/hook-log` (or `bin/log` for non-hook contexts). The hook-vs-cli
+# split lets `bin/hook-lint --check` enforce "every hook calls
+# bin/hook-log" without false-positives from CLI rows.
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Preserve the invoking directory for bin/_env_paths.project_root():
+# the cd below moves to the plugin/checkout root, which in installed-
+# plugin mode is NOT the adopter repo the CLI must operate on.
+export SPLOCK_CALLER_PWD="${SPLOCK_CALLER_PWD:-$PWD}"
+cd "$REPO_ROOT"
+
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec "$(command -v python || command -v python3)" -m bin._log.main "$@"
