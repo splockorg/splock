@@ -325,7 +325,10 @@ import subprocess
 import sys
 from typing import Any, AsyncIterator, Iterable, Protocol
 
-from bin._verify_plan.strict import TYPED_GATE_COMMAND_PREFIX
+from bin._verify_plan.strict import (
+    TYPED_GATE_COMMAND_PREFIX,
+    task_verification_exemption,
+)
 
 from .rubric import TEST_STEP_RUBRIC_SCHEMA_V1
 
@@ -1067,6 +1070,283 @@ def untrusted_pytest_trust_surface(
 
     return [p for p in surface if p not in tracked_set or p in dirty]
 
+
+
+
+#: Closed classification vocabulary for ``tests_enabled`` entries at
+#: execution/junction time (real_tests_at_junctions SC4). Plain strings
+#: so they serialize directly into the CLI JSON envelopes.
+COLLECT_COLLECTABLE = "collectable"
+"""``pytest --collect-only`` exit 0 — at least one test collected. NOTE:
+a collected-but-FAILING test is COLLECTABLE (it exits 1 at run time but
+0 at collect time); the oracle grades resolvability, not greenness."""
+
+COLLECT_NOT_COLLECTABLE = "not_collectable"
+"""``pytest --collect-only`` exit 5 (no tests collected) or exit 4 with
+an unrecognized-selector error ("ERROR: not found" — a phantom node-ID
+inside an existing file, or a vanished path). The qa C.9 oracle signal:
+this selector can NEVER pass because pytest cannot even find it."""
+
+COLLECT_ERROR = "collect_error"
+"""``pytest --collect-only`` exit 2-4 import/usage errors (e.g. the
+module raises at import). Distinct from NOT_COLLECTABLE: the selector
+RESOLVES but its module is broken — a real failure surface the retry
+loop can legitimately iterate on, so it is NOT refused at entry."""
+
+
+COLLECT_NOT_SELECTOR = "not_selector_shaped"
+"""Failed the cheap `is_runnable_pytest_selector` pre-flight (design
+prose, or names a path not on disk). The oracle is layered AFTER that
+pre-flight (plan SC4: "the cheap shape check stays as pre-flight; the
+oracle adds collectability truth") — entries classified here never
+reach the collect probe."""
+
+#: Classifications that satisfy a junction test_gate (advance-ok): a
+#: selector that resolves, or a recognized typed gate command. Everything
+#: else refuses advance.
+ADVANCE_OK_CLASSIFICATIONS = frozenset(
+    {COLLECT_COLLECTABLE, COLLECT_TYPED_COMMAND}
+)
+
+#: Subprocess timeout for one ``pytest --collect-only`` probe. Collection
+#: is import-time-only work; 120s is generous even for heavy conftests.
+_COLLECT_ONLY_PROBE_TIMEOUT_S = 120
+
+
+def collect_only_probe(
+    selector: str,
+    cwd: pathlib.Path | None = None,
+    timeout_s: int = _COLLECT_ONLY_PROBE_TIMEOUT_S,
+) -> str:
+    """Classify ``selector`` collectability via ``pytest --collect-only -q``.
+
+    The qa C.9 resolvability oracle (plan SC4): pure function over
+    ``(selector, cwd)`` — runs a deterministic subprocess and maps its
+    exit code to the closed classification vocabulary above:
+
+    - exit 0  → `COLLECT_COLLECTABLE` (≥1 test collected; pytest exits 5,
+      never 0, when nothing collects)
+    - exit 5  → `COLLECT_NOT_COLLECTABLE` (no tests collected)
+    - exit 4 + "not found" in output → `COLLECT_NOT_COLLECTABLE`
+      (unrecognized selector: phantom node-ID in an existing file —
+      pytest reports ``ERROR: not found: <selector>`` — or a path that
+      vanished between the shape check and the probe)
+    - exit 2-4 otherwise → `COLLECT_ERROR` (import/usage errors)
+
+    Handles parametrized node-IDs with whitespace inside ``[...]``
+    natively — the selector is passed as ONE argv element, no shell, so
+    ``tests/x.py::test_p[has space id]`` reaches pytest intact (research
+    F2.2/A4; the B.3 conditional resolved in plan SC4).
+
+    ``-p no:cacheprovider`` keeps the probe side-effect-free (no
+    ``.pytest_cache`` writes from probe runs). The child env is
+    sanitized via `pytest_subprocess_env` — a ``PYTEST_PLUGINS`` import
+    fires even on ``--collect-only``, and ``PYTEST_ADDOPTS`` could
+    inject argv that skews the exit-code oracle.
+    """
+    if cwd is None:
+        cwd = _repo_root()
+    argv = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "--collect-only",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        selector,
+    ]
+    result = subprocess.run(
+        argv,
+        cwd=str(cwd),
+        env=pytest_subprocess_env(),
+        capture_output=True,
+        text=True,
+        timeout=timeout_s,
+        check=False,
+    )
+    if result.returncode == 0:
+        return COLLECT_COLLECTABLE
+    if result.returncode == 5:
+        return COLLECT_NOT_COLLECTABLE
+    if result.returncode == 4:
+        output = (result.stdout or "") + (result.stderr or "")
+        if "not found" in output:
+            return COLLECT_NOT_COLLECTABLE
+        return COLLECT_ERROR
+    return COLLECT_ERROR
+
+
+def classify_tests_enabled_entry(
+    entry: str, repo_root: pathlib.Path | None = None
+) -> str:
+    """Layered classification of one ``tests_enabled`` entry (plan SC4).
+
+    Ordering is load-bearing (the "pure upgrade" contract):
+
+    1. Typed gate command — recognized by prefix, NO collect probe
+       (it isn't pytest; probing it would be a category error).
+    2. Cheap pre-flight — `is_runnable_pytest_selector` (shape + on-disk).
+       Failures classify `COLLECT_NOT_SELECTOR` and NEVER reach the
+       probe — the pre-flight is retained, the oracle layered after it.
+    3. Collect-only probe — collectability truth for shape-valid
+       selectors via `collect_only_probe`.
+    """
+    if entry.startswith(TYPED_GATE_COMMAND_PREFIX):
+        return COLLECT_TYPED_COMMAND
+    if repo_root is None:
+        repo_root = _repo_root()
+    if not is_runnable_pytest_selector(entry, repo_root):
+        return COLLECT_NOT_SELECTOR
+    return collect_only_probe(entry, cwd=repo_root)
+
+
+def junction_collect_check(
+    plan_dir: pathlib.Path,
+    *,
+    slug: str,
+    junction_id: str,
+    repo_root: pathlib.Path | None = None,
+) -> dict[str, Any]:
+    """Junction-time consolidated collect-check (plan SC4 + SC6).
+
+    Loads the orchestrator, resolves the junction's covering set via
+    T4's `junction_covering_set` (explicit ``covers[]`` verbatim, else
+    the documented all-prior-tasks-through-``after_task`` default),
+    unions the covered tasks' ``tests_enabled`` through T2's
+    `resolve_tests_enabled` (the canonical `<slug>_orchestrator.json`
+    source — no split source), classifies every entry, and returns a
+    structured verdict.
+
+    advance-ok iff the union is NON-empty AND every entry classifies
+    into `ADVANCE_OK_CLASSIFICATIONS` (collectable selector / recognized
+    typed command). An empty union is NOT advance-ok — a test_gate whose
+    covering set carries zero verifiable entries is exactly the
+    silent-partial-coverage failure mode this slug exists to kill.
+
+    A selector belonging to a task OUTSIDE the covering set never
+    enters the union, so it can neither satisfy nor block the gate
+    (closes qa C.3).
+
+    Narrowed SC3 exemption (T6): covered tasks that declare the
+    ``verification_kind:`` test_plan marker (per
+    `bin._verify_plan.strict.task_verification_exemption`) are surfaced
+    in the verdict's ``exempt_tasks`` list — recognized, with NO command
+    dispatched against them. Advance semantics are deliberately
+    UNCHANGED: an exempt task contributes nothing to the union (it
+    neither satisfies nor blocks), and a covering set of ONLY exempt
+    tasks still refuses with ``empty_union`` — a *test_gate* over zero
+    runnable tests is vacuous regardless of why; plans whose junction
+    coverage is purely exempt/doc work should use a ``review_gate``
+    junction instead. The ``exempt_tasks`` surfacing exists so the
+    refusal diagnostic shows the operator/planner WHY the union is
+    empty.
+
+    Returns
+    -------
+    dict
+        ``{slug, junction_id, junction_kind, covering_set, entries:
+        [{entry, task_ids, classification}, ...], exempt_tasks:
+        [{task_id, verification_kind}, ...], advance_ok,
+        refusal_reason}`` — ``refusal_reason`` is ``None`` on
+        advance-ok, else ``"empty_union"`` or
+        ``"not_collectable_entries"``.
+
+    Raises
+    ------
+    ValueError
+        ``junction_id`` not present in the orchestrator's
+        ``junctions[]``; or covering-set resolution failed (bogus
+        ``covers[]`` entry / unresolvable ``after_task`` — propagated
+        from `junction_covering_set`).
+    """
+    # Lazy imports: both modules are SDK-free, but keeping them local
+    # mirrors how main.py defers cross-package imports to call time.
+    from bin._orchestrator_query.orchestrator_loader import load_orchestrator
+    from bin._orchestrator_query.orchestrator_loader import (
+        junction_covering_set,
+    )
+    from bin._retry_loop.briefing import resolve_tests_enabled
+
+    plan_dir = pathlib.Path(plan_dir)
+    orchestrator = load_orchestrator(plan_dir, slug)
+
+    junctions = orchestrator.get("junctions", []) or []
+    junction = next(
+        (j for j in junctions if isinstance(j, dict) and j.get("id") == junction_id),
+        None,
+    )
+    if junction is None:
+        known = [j.get("id", "<unknown>") for j in junctions if isinstance(j, dict)]
+        raise ValueError(
+            f"junction {junction_id!r} not found in {slug!r} orchestrator "
+            f"(known junctions: {known})"
+        )
+
+    covering_set = junction_covering_set(orchestrator, junction)
+
+    # Narrowed SC3 exemption surfacing (T6): covered tasks declaring the
+    # verification_kind: marker are reported, never dispatched (there is
+    # no runner behind the marker — that is the point of the narrow
+    # branch). Pure recognition via the strict.py single-source helper.
+    tasks_by_id = {
+        t.get("id"): t
+        for t in orchestrator.get("tasks", []) or []
+        if isinstance(t, dict)
+    }
+    exempt_tasks: list[dict[str, str]] = []
+    for task_id in covering_set:
+        kind = task_verification_exemption(tasks_by_id.get(task_id) or {})
+        if kind is not None:
+            exempt_tasks.append(
+                {"task_id": task_id, "verification_kind": kind}
+            )
+
+    # Union the covering set's tests_enabled, first-seen order, tracking
+    # which task(s) contributed each entry. Falsy entries are dropped
+    # (mirrors read_tests_enabled_union — only non-empty strings count).
+    contributed_by: dict[str, list[str]] = {}
+    for task_id in covering_set:
+        for entry in resolve_tests_enabled(plan_dir, slug, task_id):
+            if not entry:
+                continue
+            contributed_by.setdefault(entry, []).append(task_id)
+
+    entries = [
+        {
+            "entry": entry,
+            "task_ids": task_ids,
+            "classification": classify_tests_enabled_entry(entry, repo_root),
+        }
+        for entry, task_ids in contributed_by.items()
+    ]
+
+    failing = [
+        e for e in entries
+        if e["classification"] not in ADVANCE_OK_CLASSIFICATIONS
+    ]
+    if not entries:
+        advance_ok, refusal_reason = False, "empty_union"
+    elif failing:
+        advance_ok, refusal_reason = False, "not_collectable_entries"
+    else:
+        advance_ok, refusal_reason = True, None
+
+    return {
+        "slug": slug,
+        "junction_id": junction_id,
+        "junction_kind": junction.get("kind"),
+        "covering_set": covering_set,
+        "entries": entries,
+        "exempt_tasks": exempt_tasks,
+        "advance_ok": advance_ok,
+        "refusal_reason": refusal_reason,
+    }
+
+
+# ----------------------------------------------------------------------
+# T4 — spawn_reviewer_via_sdk + ReviewerEmissionExhausted
+# ----------------------------------------------------------------------
 
 
 #: Default Sonnet model alias used when ``OVERNIGHT_SONNET_REVIEW_MODEL``
