@@ -4,11 +4,19 @@
 # ADOPTION.md). These two packages are imported LAZILY (inside functions,
 # never at module load) and are required ONLY for:
 #
-#   anthropic        -> bin/plan, bin/implplan   (two-call planner SDK calls)
-#   claude-agent-sdk -> bin/verify test-step      (Sonnet reviewer spawn in
-#                                                   the §F.3 retry loop)
+#   claude-agent-sdk -> bin/plan, bin/implplan   (two-call planner, via the
+#                                                   subscription bridge)
 #                    -> bin/qa                    (subscription-billed transport
 #                                                   via bin/_sdk_bridge.py)
+#                    -> bin/verify test-step      (Sonnet reviewer spawn in
+#                                                   the §F.3 retry loop)
+#
+#   anthropic        -> no default path. Nothing constructs `anthropic.Anthropic()`
+#                       any more: the planner and qa both default to the
+#                       subscription bridge. The `AnthropicClient` Protocol in
+#                       bin/_planner/two_call.py still DESCRIBES that surface, so
+#                       an operator who injects a metered client (`client=...`)
+#                       needs this installed. Kept for that seam alone.
 #
 # Install into the venv splock activates ($SPLOCK_VENV, else ./.venv):
 #
