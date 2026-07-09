@@ -28,6 +28,49 @@ from typing import Final
 from .external_input_sanitize import DELIMITER_INSTRUCTION, wrap
 
 # ----------------------------------------------------------------------
+# tests_enabled contract (shared by Call 1 + Call 2, implplan step)
+# ----------------------------------------------------------------------
+
+TESTS_ENABLED_CONTRACT: Final[str] = (
+    "tests_enabled contract (implplan only):\n"
+    "  - Every tests_enabled entry MUST be a runnable pytest selector --\n"
+    "    path/to/test_file.py or path/to/test_file.py::test_name -- whose\n"
+    "    path component appears in the SAME task's file_paths_touched.\n"
+    "    The typed gate command shape ('gate_cmd:' prefix; exit 0 = pass)\n"
+    "    is RESERVED, not active -- do NOT author it; nothing executes it\n"
+    "    (real_tests_at_junctions T6/SC3 narrowed decision).\n"
+    "  - Prose describing testing intent belongs in that task's test_plan\n"
+    "    entries, never in tests_enabled.\n"
+    "  - An empty tests_enabled is allowed only for pure bookkeeping or\n"
+    "    doc-only tasks; such a task SHOULD declare why via a\n"
+    "    verification_kind exemption marker: a test_plan entry whose\n"
+    "    test_id starts with 'verification_kind:' (e.g.\n"
+    "    'verification_kind: artifact_review'), with asserts/fixture\n"
+    "    describing the non-pytest verification."
+)
+"""The tests_enabled authoring contract (real_tests_at_junctions SC1).
+
+Embedded in BOTH the Call 1 reasoning instructions and the Call 2
+emission system prompt so the shape constraint survives transcription.
+This is the soft, LLM-dependent layer; the deterministic twin is the
+plan-time validator (SC2) in `bin/_verify_plan/strict.py`.
+
+T6 (SC3) update: the typed-gate-command branch was NARROWED — the
+`gate_cmd:` prefix is reserved recognition-only (the strict validator
+rejects an authored entry as of the 2026-06-11 follow-up patch; the
+junction-time classifier still recognizes but no gate executes it),
+and the supported
+convention for non-pytest tasks is the `verification_kind:` test_plan
+exemption marker (`bin/_verify_plan/strict.VERIFICATION_KIND_MARKER_PREFIX`).
+See `docs/plans/_closed/real_tests_at_junctions/typed_gate_command_decision.md`.
+
+MUST NOT contain `{` or `}` — it is concatenated into templates that
+later go through `.format(...)`, where stray braces would raise
+KeyError at render time.
+"""
+
+
+# ----------------------------------------------------------------------
 # Call 1 — Reasoning (no response_format)
 # ----------------------------------------------------------------------
 
@@ -71,10 +114,15 @@ CALL1_USER_TEMPLATE: Final[str] = (
     "  Decompose this planning problem into {plan_fields_or_tasks}.\n"
     "  For each entry, reason through:\n"
     "    - what failure modes the entry addresses\n"
-    "    - what tests catch those failure modes (tests_enabled targets)\n"
+    "    - what tests catch those failure modes (tests_enabled targets --\n"
+    "      for implplan, name runnable selectors per the contract below,\n"
+    "      and put the narrative testing intent in test_plan entries)\n"
     "    - what dependencies the entry has\n"
     "    - (implplan only) which file paths and call sites are touched\n"
     "  Emit your reasoning as free-form markdown.\n"
+    "\n"
+    + TESTS_ENABLED_CONTRACT
+    + "\n"
 )
 """Call 1 user prompt template. All external inputs are wrapped in named
 delimiters BY THE CALLER (`render_call1_user`) before being slotted in;
@@ -203,12 +251,25 @@ CALL2_SYSTEM: Final[str] = (
     "reasoning. The schema is authoritative; the reasoning is your "
     "source.\n"
     "\n"
+    "When emitting an orchestrator (implplan step), one SHAPE rule applies "
+    "at transcription time: if the reasoning describes a test in prose, "
+    "place that prose in the task's test_plan entries and emit in "
+    "tests_enabled only the runnable pytest selector or typed gate command "
+    "it names.\n"
+    "\n"
+    + TESTS_ENABLED_CONTRACT
+    + "\n"
+    "\n"
     "Output via the structured output mechanism — your output_format is "
     "set; emit a single JSON document matching the schema."
 )
 """Call 2 system prompt for the FULL-emission modes ('plan' / 'implplan').
 `{step}` is 'plan' or 'implplan'. Transcribes Call 1's reasoning into a
-single full plan/orchestrator JSON document."""
+single full plan/orchestrator JSON document.
+
+Embeds `TESTS_ENABLED_CONTRACT` (real_tests_at_junctions SC1) so the
+emission step preserves selector shape rather than transcribing Call 1
+test prose verbatim into `tests_enabled`."""
 
 
 CALL2_SYSTEM_PATCH: Final[str] = (
@@ -342,6 +403,7 @@ __all__ = [
     "CALL2_SYSTEM",
     "CALL2_SYSTEM_PATCH",
     "CALL2_USER_TEMPLATE",
+    "TESTS_ENABLED_CONTRACT",
     "render_call1_user",
     "render_call2_user",
     "select_call2_system",
