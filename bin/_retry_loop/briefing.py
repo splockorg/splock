@@ -72,6 +72,136 @@ DEBUG_PROMPT_FILENAME_TEMPLATE = "_sonnet_prompt_iter{n}.txt"
 HOOK_FLAG_ABSENT_SENTINEL = "(no test-file edits flagged this iteration)"
 
 
+#: ``bin/_retry_loop/main.py`` derives the orchestrator path
+#: (``plan_dir / f"{slug}_orchestrator.json"``).
+CANONICAL_TESTS_ENABLED_SOURCE = "{slug}_orchestrator.json"
+
+
+def canonical_tests_enabled_path(plan_dir: Path, slug: str) -> Path:
+    """Resolve the canonical per-task ``tests_enabled`` carrier for ``slug``.
+
+    The single path-derivation seam for every ``tests_enabled`` consumer:
+    ``plan_dir / <slug>_orchestrator.json`` per
+    ``CANONICAL_TESTS_ENABLED_SOURCE``.
+    """
+    return Path(plan_dir) / CANONICAL_TESTS_ENABLED_SOURCE.format(slug=slug)
+
+
+def resolve_tests_enabled(plan_dir: Path, slug: str, task_id: str) -> list[str]:
+    """Resolve a task's ``tests_enabled`` from the CANONICAL source.
+
+    Source-of-truth pin (real_tests_at_junctions SC5 / T2): the canonical
+    carrier of per-task ``tests_enabled`` is ``<slug>_orchestrator.json``
+    ``tasks[].tests_enabled``. ``_state.json`` carries task statuses only —
+    it has NO ``tests_enabled`` field anywhere (the shipped writer,
+    ``bin/_update_orchestrator/state_writer.py``, never writes one). Any
+    consumer that needs a task's test set MUST resolve through this helper
+    so there is no split source — T3 (``bin/_verify_plan/strict.py``) and
+    T5 (``bin/_retry_loop/sdk_spawners.py`` / ``main.py``) import this.
+
+    Unlike this module's best-effort briefing readers (``_read_plan_summary``
+    et al.), this resolver fails LOUD: a missing orchestrator file, a
+    malformed ``tasks`` list, or an unknown task id raises rather than
+    silently returning an empty set — a silent empty here would let a test
+    gate pass vacuously.
+
+    Parameters
+    ----------
+    plan_dir : Path
+        Resolved slug directory (``docs/plans/<slug>/``).
+    slug : str
+        Plan slug; formats ``CANONICAL_TESTS_ENABLED_SOURCE``.
+    task_id : str
+        The orchestrator task id (e.g. ``"T2"``).
+
+    Returns
+    -------
+    list[str]
+        The task's ``tests_enabled`` entries (a fresh list; ``[]`` when the
+        task declares none — that is a REAL declared-empty, not a fallback).
+
+    Raises
+    ------
+    FileNotFoundError
+        The canonical orchestrator JSON does not exist at the derived path.
+    ValueError
+        The orchestrator JSON is malformed (no ``tasks`` list, or the
+        task's ``tests_enabled`` is not a list).
+    KeyError
+        ``task_id`` is not present in the orchestrator's ``tasks``.
+    """
+    orch_path = canonical_tests_enabled_path(plan_dir, slug)
+    if not orch_path.exists():
+        raise FileNotFoundError(
+            f"canonical tests_enabled source not found: {orch_path} "
+            f"(decision: <slug>_orchestrator.json is canonical; "
+            f"_state.json is statuses-only)"
+        )
+    data = json.loads(orch_path.read_text(encoding="utf-8"))
+    tasks = data.get("tasks") if isinstance(data, dict) else None
+    if not isinstance(tasks, list):
+        raise ValueError(
+            f"malformed orchestrator JSON (no `tasks` list): {orch_path}"
+        )
+    for task in tasks:
+        if isinstance(task, dict) and task.get("id") == task_id:
+            tests = task.get("tests_enabled")
+            if tests is None:
+                return []
+            if not isinstance(tests, list):
+                raise ValueError(
+                    f"task {task_id!r} `tests_enabled` is not a list "
+                    f"in {orch_path}"
+                )
+            return [t for t in tests if isinstance(t, str)]
+    raise KeyError(
+        f"task {task_id!r} not found in canonical source {orch_path}"
+    )
+
+
+# ----------------------------------------------------------------------
+# Briefing data structures
+# ----------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class TestStepBriefingInputs:
+    """Closed-list inputs for test-step reviewer prompt construction.
+
+    Per §F.impl.6 Input sources table — there are NO additional inputs
+    accepted by `build_briefing(...)`; each field maps to a CLI-derived
+    artifact.
+    """
+
+    slug: str
+    iteration_n: int
+    test_output: str
+    iteration_diff: str  # committed scope: git diff HEAD~1..HEAD
+    working_tree_diff: str  # uncommitted scope: git diff HEAD + untracked paths
+    hook_flag_content: str  # raw JSONL or HOOK_FLAG_ABSENT_SENTINEL
+    prior_diagnosis: dict[str, Any] | None  # structured Sonnet output from prior iter
+    iteration_metadata: dict[str, Any]  # driver-populated _metadata block
+
+
+@dataclass(frozen=True)
+class BoundaryBriefingInputs:
+    """Closed-list inputs for phase-boundary reviewer prompt construction.
+
+    Per plan §F.9.2 — the briefing builder reads structured artifacts
+    from the slug directory and emits a deterministic briefing dict.
+    """
+
+    slug: str
+    boundary: str  # "plan_to_implplan" | "implplan_to_code"
+    plan_summary: dict[str, Any]
+    orchestrator_shape: dict[str, Any]
+    planner_telemetry: list[dict[str, Any]]
+
+
+# ----------------------------------------------------------------------
+# Public entry: build_briefing
+# ----------------------------------------------------------------------
+
+
 # ----------------------------------------------------------------------
 # Briefing data structures
 # ----------------------------------------------------------------------
