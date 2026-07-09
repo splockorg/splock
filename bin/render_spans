@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# bin/render_spans — derive OpenInference-shape spans (§J.impl.3).
+#
+# POSIX wrapper that activates the project venv and dispatches to
+# `python -m bin._render_spans.main`. v2.7 emits derived spans only;
+# native per-emitter span writes ship later via marker NSE.
+#
+# Usage:
+#   bin/render_spans <slug> [--json] [--stdout]
+#
+# Exit codes: 0 ok / 1 usage / 5 unsupported-schema / 7 atomic-write-failed.
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Preserve the invoking directory for bin/_env_paths.project_root():
+# the cd below moves to the plugin/checkout root, which in installed-
+# plugin mode is NOT the adopter repo whose plan logs we derive from.
+export SPLOCK_CALLER_PWD="${SPLOCK_CALLER_PWD:-$PWD}"
+cd "$REPO_ROOT"
+
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec "$(command -v python || command -v python3)" -m bin._render_spans.main "$@"
