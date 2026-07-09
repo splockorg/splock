@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "slug": "test_acceptance_l_plan",
+  "phase": "Phase 3",
+  "plan_ref": "test_acceptance_l_plan_plan.json",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "First task",
+      "file_paths_touched": [],
+      "tests_enabled": [],
+      "agent_assignment": {"subagent": "coder", "model": "inherit"}
+    },
+    {
+      "id": "T2",
+      "title": "Second task",
+      "file_paths_touched": [],
+      "tests_enabled": [],
+      "agent_assignment": {"subagent": "coder", "model": "inherit"}
+    },
+    {
+      "id": "T3",
+      "title": "Third task",
+      "file_paths_touched": [],
+      "tests_enabled": [],
+      "agent_assignment": {"subagent": "coder", "model": "inherit"}
+    },
+    {
+      "id": "T4",
+      "title": "Fourth task",
+      "file_paths_touched": [],
+      "tests_enabled": [],
+      "agent_assignment": {"subagent": "coder", "model": "inherit"}
+    },
+    {
+      "id": "T5",
+      "title": "Fifth task",
+      "file_paths_touched": [],
+      "tests_enabled": [],
+      "agent_assignment": {"subagent": "coder", "model": "inherit"}
+    }
+  ]
+}

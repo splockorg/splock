@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "slug": "missing-status",
+  "phase": "Phase 3",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Task without status"
+    }
+  ]
+}

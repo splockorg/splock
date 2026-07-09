@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "slug": "unknown-status",
+  "phase": "Phase 3",
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Task with pre-rename status",
+      "status": "todo"
+    }
+  ]
+}
