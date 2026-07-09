@@ -58,7 +58,7 @@ cross-cutting sealed-state inventory consumed by §G.impl's
 The derived MD files (`<slug>_plan.md`, `<slug>_orchestrator.md`) are
 **not** sealed — operator anchor-block edits must survive re-render per
 implplan §B.impl.5. §G.impl will register these paths when it lands;
-this build (Phase 1 §B) does not author `.claude/hooks/`.
+this build (Phase 1 §B) does not author `hooks/`.
 
 ## Per-phase planner integration
 
