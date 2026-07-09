@@ -317,6 +317,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import logging
 import os
 import pathlib
 import shlex
@@ -327,6 +328,8 @@ from typing import Any, AsyncIterator, Iterable, Protocol
 from bin._verify_plan.strict import TYPED_GATE_COMMAND_PREFIX
 
 from .rubric import TEST_STEP_RUBRIC_SCHEMA_V1
+
+logger = logging.getLogger(__name__)
 
 
 # ----------------------------------------------------------------------
@@ -489,6 +492,27 @@ def _repo_root() -> pathlib.Path:
     return project_root()
 
 
+def _persist_iter_output(
+    plan_dir: pathlib.Path,
+    iteration_n: int,
+    result: subprocess.CompletedProcess,
+) -> None:
+    """Best-effort capture of a verify result to ``_test_output_iter{n}.txt``.
+
+    The briefing builder reads this file on the next iteration. OSErrors are
+    swallowed (the in-memory ``CompletedProcess`` still carries stdout/stderr)
+    — matches the legacy ``_default_run_verify`` swallow-on-OSError shape.
+    """
+    output_path = plan_dir / _TEST_OUTPUT_FILENAME_TEMPLATE.format(n=iteration_n)
+    try:
+        output_path.write_text(
+            (result.stdout or "") + "\n--- STDERR ---\n" + (result.stderr or ""),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
 def read_tests_enabled_union(orchestrator_path: pathlib.Path) -> list[str]:
     """Deduplicated, sorted union of ``tasks[*].tests_enabled`` strings.
 
@@ -622,20 +646,42 @@ def run_verify_subprocess(
        multiple tasks and the failure surface for any of them counts.
     3. Raise ``ValueError`` if the union is empty (task contract has
        nothing to verify — fail loudly before shelling out).
-    4. Build a pytest argv of the form
-       ``[sys.executable, "-m", "pytest", <test_ids...>, "-v"]``.
-       NEVER ``bin/verify``: that recursion is precisely what T3 exists
-       to prevent.
-    5. Run via ``subprocess.run`` with ``cwd`` pinned to the repo root
-       (so relative test paths resolve) and ``capture_output=True``.
-    6. Persist captured stdout (with a stderr appendix matching the
+    4. Partition the union into runnable pytest selectors (node-IDs /
+       paths that exist on disk) vs. skipped entries (design-prose or
+       not-yet-authored files) via `partition_runnable_selectors`. Only
+       runnable selectors enter the argv; skipped entries are logged.
+       If **zero** selectors are runnable, return a synthetic exit-4
+       ``CompletedProcess`` WITHOUT shelling out — a bare ``pytest`` with
+       no test-ids would collect the entire repo suite. See #11 / #12.
+    5. Build a HARDENED pytest argv via `build_pytest_argv` —
+       ``[_test_interpreter(), "-m", "pytest", *PYTEST_HARDENING_FLAGS,
+       <runnable...>, "-v"]`` — NEVER ``bin/verify`` (the recursion T3
+       exists to prevent) — and run via ``subprocess.run`` with ``cwd``
+       pinned to the ADOPTER's repo root, ``capture_output=True``, and the child
+       env sanitized via `pytest_subprocess_env` (the env-channel
+       injection clamp). The hardening flags (real_tests_at_junctions
+       SC8) clamp cacheprovider state and ini-file ``addopts``
+       injection; see `PYTEST_HARDENING_FLAGS`.
+    6. If pytest exited 0, run the SC8 trust check
+       (`untrusted_pytest_trust_surface`): a green exit is only a
+       TRUSTED green when every ``conftest.py`` / pytest ini file the
+       invocation would consult is committed-clean in git. No flag can
+       neutralize a force-pass ``pytest_runtest_makereport`` hook in a
+       conftest (it is arbitrary in-process code), so provenance is
+       the gate: untracked/modified trust-surface files coerce the
+       returncode to `UNTRUSTED_GREEN_RETURNCODE` with a loud
+       ``UNTRUSTED-GREEN`` diagnostic appended to stderr. RED results
+       pass through unmodified (red is red). See
+       ``docs/plans/_closed/real_tests_at_junctions/trust_boundary_decision.md``.
+    7. Persist captured stdout (with a stderr appendix matching the
        legacy ``_default_run_verify`` shape) to
        ``plan_dir / _test_output_iter{n}.txt`` so the briefing builder
        can read it on the next iteration.
-    7. Return the ``CompletedProcess`` **as-is**. The return code is
-       NOT coerced: pytest exit code 5 (no tests collected) must
-       surface intact so callers can distinguish "ran but found
-       nothing" from "ran and failed" (exit 1).
+    8. Return the ``CompletedProcess``. Apart from the SC8
+       untrusted-green coercion above, the return code is NOT touched:
+       pytest exit code 5 (no tests collected) must surface intact so
+       callers can distinguish "ran but found nothing" from "ran and
+       failed" (exit 1).
 
     Parameters
     ----------
@@ -665,13 +711,7 @@ def run_verify_subprocess(
         If the union of ``tests_enabled`` across all orchestrator tasks
         is empty.
     """
-    payload = json.loads(orchestrator_path.read_text(encoding="utf-8"))
-
-    union: set[str] = set()
-    for task in payload.get("tasks", []) or []:
-        for test_id in task.get("tests_enabled", []) or []:
-            if isinstance(test_id, str) and test_id:
-                union.add(test_id)
+    union = read_tests_enabled_union(orchestrator_path)
 
     if not union:
         raise ValueError(
@@ -679,58 +719,355 @@ def run_verify_subprocess(
             f"(orchestrator_path={orchestrator_path!s})"
         )
 
-    test_ids = sorted(union)
+    repo_root = _repo_root()
+    runnable, skipped = partition_runnable_selectors(union, repo_root)
 
-    # Resolve the ADOPTER's repo root + interpreter, not the plugin's. When
-    # splock runs as an installed plugin, __file__/parents[2] is the plugin
-    # tree and sys.executable is the plugin venv — neither can see nor import
-    # the adopter's tests. Honour $CLAUDE_PROJECT_DIR + the adopter venv so
-    # the retry loop grades the RIGHT suite (fork finding F3; same
-    # adopter-root class as OI-1 / F2).
-    from bin._env_paths import project_root as _project_root
+    if skipped:
+        logger.warning(
+            "run_verify_subprocess[%s]: skipping %d non-runnable tests_enabled "
+            "entr%s (not a pytest node-ID / not on disk): %s",
+            slug,
+            len(skipped),
+            "y" if len(skipped) == 1 else "ies",
+            ", ".join(repr(s) for s in skipped),
+        )
 
-    repo_root = _project_root()
-    interpreter = os.environ.get("SPLOCK_TEST_PYTHON") or ""
-    if not interpreter:
-        adopter_py = repo_root / ".venv" / "bin" / "python"
-        interpreter = str(adopter_py) if adopter_py.exists() else sys.executable
+    if not runnable:
+        # Zero runnable selectors. NEVER shell out to a bare ``pytest`` —
+        # an empty test-id argv would collect the *entire* repo suite
+        # (pytest's default ``testpaths``), grading the wrong thing. Return
+        # a synthetic exit-4 (pytest's usage / collection-error code) so the
+        # caller treats it as a failure. The operator-direct path is
+        # fast-failed earlier by ``main._run_test_step``'s pre-flight (no
+        # retry budget consumed there); this branch is the defence-in-depth
+        # for the in-process chain-driver path. See outstanding-issues #11/#12.
+        diagnostic = (
+            f"no runnable pytest selectors among {len(union)} tests_enabled "
+            f"entr{'y' if len(union) == 1 else 'ies'} for slug={slug!r}; every "
+            "entry is non-node-ID prose or names a file not yet on disk: "
+            + ", ".join(repr(s) for s in union)
+        )
+        result = subprocess.CompletedProcess(
+            args=[_test_interpreter(), "-m", "pytest"],
+            returncode=4,
+            stdout="",
+            stderr=diagnostic + "\n",
+        )
+        _persist_iter_output(plan_dir, iteration_n, result)
+        return result
 
-    # tests_enabled are bare pytest node NAMES, not paths. Pass them as a
-    # `-k` selection expression — bare positional args are treated as file
-    # paths and collect nothing (the original bug).
-    selection = " or ".join(test_ids)
-    argv = [interpreter, "-m", "pytest", "-k", selection, "-v"]
+    argv = build_pytest_argv(runnable)
 
     result = subprocess.run(
         argv,
         cwd=str(repo_root),
+        env=pytest_subprocess_env(),
         capture_output=True,
         text=True,
         timeout=_PYTEST_SUBPROCESS_TIMEOUT_S,
         check=False,
     )
 
-    output_path = plan_dir / _TEST_OUTPUT_FILENAME_TEMPLATE.format(n=iteration_n)
-    try:
-        output_path.write_text(
-            (result.stdout or "")
-            + "\n--- STDERR ---\n"
-            + (result.stderr or ""),
-            encoding="utf-8",
-        )
-    except OSError:
-        # Capture is best-effort; the retry loop's briefing builder
-        # tolerates a missing file and the returned CompletedProcess
-        # still carries stdout/stderr in-memory for the caller. Match
-        # the legacy ``_default_run_verify`` swallow-on-OSError shape.
-        pass
+    # real_tests_at_junctions T8 (SC8) — trust check on GREEN results
+    # only. A force-pass conftest hook (pytest_runtest_makereport
+    # flipping failed→passed) yields exit 0 that no flag set can
+    # prevent; the gate therefore refuses to TRUST a green run whose
+    # conftest/ini trust surface is not committed-clean. Red results
+    # are never touched — a real failure must reach the retry loop
+    # intact.
+    if result.returncode == 0:
+        untrusted = untrusted_pytest_trust_surface(runnable, repo_root)
+        if untrusted:
+            diagnostic = (
+                "UNTRUSTED-GREEN: pytest exited 0 but the following "
+                "pytest trust-surface files (conftest.py / pytest ini) "
+                "are untracked or modified relative to git HEAD, so the "
+                "green result is NOT trusted (a plan- or repair-authored "
+                "conftest can force-pass failures in-process; invocation "
+                "flags cannot neutralize that): "
+                + ", ".join(untrusted)
+                + f". Returncode coerced to {UNTRUSTED_GREEN_RETURNCODE}. "
+                "Remedy: the operator reviews the listed files and "
+                "commits them (an explicit trust grant), then re-runs "
+                "/test. See docs/plans/_closed/real_tests_at_junctions/"
+                "trust_boundary_decision.md."
+            )
+            logger.warning("run_verify_subprocess[%s]: %s", slug, diagnostic)
+            result = subprocess.CompletedProcess(
+                args=result.args,
+                returncode=UNTRUSTED_GREEN_RETURNCODE,
+                stdout=result.stdout,
+                stderr=(result.stderr or "") + "\n" + diagnostic + "\n",
+            )
 
+    _persist_iter_output(plan_dir, iteration_n, result)
     return result
 
 
 # ----------------------------------------------------------------------
-# T4 — spawn_reviewer_via_sdk + ReviewerEmissionExhausted
+# real_tests_at_junctions T8 (SC8) — pytest-invocation hardening +
+# repair-must-not-author-tests write-scope enforcement
 # ----------------------------------------------------------------------
+#
+# Posture: fixer-must-not-author-tests / skip-not-repair. Full decision
+# record (chosen flag set, threat model, two live incidents, residual
+# vectors, phase-4 exemption rationale, the iteration-ordering follow-up)
+# lives at docs/plans/_closed/real_tests_at_junctions/trust_boundary_decision.md.
+
+
+#: SC8 hardening flags injected into every retry-loop pytest invocation
+#: (`build_pytest_argv`). Two clamps:
+#:
+#: - ``-p no:cacheprovider`` — no ``.pytest_cache`` reads/writes: cache
+#:   state (``--lf``-style selection, cached collection) can neither
+#:   narrow nor skew what the gate grades, and verify runs stay
+#:   side-effect-free (matches `collect_only_probe`).
+#: - ``--override-ini addopts=`` — clamps ini-file ``addopts`` to empty.
+#:   A plan-authored ``pytest.ini`` (nested in the selector subtree —
+#:   pytest's rootdir search starts at the args' common ancestor — or at
+#:   the repo root) could otherwise smuggle arbitrary argv into the run:
+#:   ``-p <evil plugin>``, ``--co`` (collect-only exits 0 without running
+#:   a single test), ``-k``/``--deselect`` narrowing, etc. Command-line
+#:   ``--override-ini`` beats every ini source. The repo's own pytest.ini
+#:   carries only ``markers`` (no addopts), so the clamp is behavior-
+#:   neutral for legitimate runs.
+#:
+#: What flags deliberately do NOT attempt: neutralizing a force-pass
+#: ``conftest.py`` hook. conftest files are arbitrary code loaded
+#: in-process; ``--noconftest`` would disable the repo's legitimate
+#: fixture conftests suite-wide (tests/CLAUDE.md helpers). The conftest
+#: vector is closed by provenance (`untrusted_pytest_trust_surface`) +
+#: the repair write-scope guard (`enforce_repair_write_scope`) instead.
+#:
+#: Env-channel siblings of the addopts vector (``PYTEST_ADDOPTS`` /
+#: ``PYTEST_PLUGINS``) are out of argv reach — `pytest_subprocess_env`
+#: clamps those at every retry-loop pytest subprocess site.
+PYTEST_HARDENING_FLAGS: tuple[str, ...] = (
+    "-p",
+    "no:cacheprovider",
+    "--override-ini",
+    "addopts=",
+)
+
+#: Env vars stripped from every retry-loop pytest subprocess — exactly
+#: the two documented env-channel injection vectors clamped by
+#: `pytest_subprocess_env`. See its docstring for the threat model.
+_PYTEST_ENV_INJECTION_VARS = ("PYTEST_ADDOPTS", "PYTEST_PLUGINS")
+
+
+def pytest_subprocess_env() -> dict[str, str]:
+    """Sanitized copy of ``os.environ`` for retry-loop pytest subprocesses.
+
+    Threat model: pytest honors ``PYTEST_ADDOPTS`` (argv injection —
+    e.g. ``--co`` turns every run collect-only and exits 0 without
+    executing a single test ⇒ silent false-green) and ``PYTEST_PLUGINS``
+    (arbitrary plugin import, firing even under ``--collect-only``);
+    both env channels bypass the argv-level ``--override-ini addopts=``
+    clamp, so they are removed from the child env here.
+
+    Deliberately scoped to exactly those two channels: every other
+    ``PYTEST_*`` var (notably ``PYTEST_DISABLE_PLUGIN_AUTOLOAD``) passes
+    through — stripping autoload-disable could change collection
+    behavior. ``os.environ`` itself is never mutated.
+    """
+    env = dict(os.environ)
+    for name in _PYTEST_ENV_INJECTION_VARS:
+        env.pop(name, None)
+    return env
+
+#: Returncode `run_verify_subprocess` substitutes for a pytest exit 0
+#: whose conftest/ini trust surface is not committed-clean. Outside
+#: pytest's reserved 0-5 vocabulary so the operator/loop can tell
+#: "untrusted green" from every real pytest outcome. Non-zero on
+#: purpose: the retry loop grades it as a failure and the diagnostic
+#: lands in the reviewer briefing.
+UNTRUSTED_GREEN_RETURNCODE = 13
+
+#: Ini basenames pytest consults during rootdir/config discovery. Any of
+#: these on a selector's directory chain can alter collection/grading,
+#: so they share conftest.py's trust treatment.
+_PYTEST_INI_BASENAMES = ("pytest.ini", "tox.ini", "setup.cfg", "pyproject.toml")
+
+_PYTEST_CONFTEST_BASENAME = "conftest.py"
+
+def _test_interpreter() -> str:
+    """The ADOPTER's python for retry-loop pytest runs (fork finding F3).
+
+    Upstream hardcodes ``sys.executable``. When splock runs as an installed
+    plugin that is the PLUGIN's venv: it cannot import the adopter's test deps,
+    so every graded run fails for the wrong reason. Resolution order mirrors
+    the rest of the adopter-root layer:
+
+    1. ``$SPLOCK_TEST_PYTHON`` — explicit operator override.
+    2. ``<project_root>/.venv/bin/python`` when present.
+    3. ``sys.executable`` — correct in sideloaded / in-tree mode, where the
+       adopter repo IS the plugin repo.
+    """
+    override = os.environ.get("SPLOCK_TEST_PYTHON", "").strip()
+    if override:
+        return override
+    adopter_py = _repo_root() / ".venv" / "bin" / "python"
+    return str(adopter_py) if adopter_py.is_file() else sys.executable
+
+
+def build_pytest_argv(runnable: Iterable[str]) -> list[str]:
+    """Assemble the hardened pytest argv for the retry-loop verify run.
+
+    Single source of the invocation shape (SC8): ``[_test_interpreter(), -m,
+    pytest, *PYTEST_HARDENING_FLAGS, *runnable, -v]``. argv[0] is the
+    ADOPTER's python, never the plugin venv's (F3) — see `_test_interpreter`. Named + exported
+    so the T8 test introspects the builder rather than scraping a
+    subprocess recorder, and so future flag changes happen in exactly
+    one place (`PYTEST_HARDENING_FLAGS`).
+    """
+    return [
+        _test_interpreter(),
+        "-m",
+        "pytest",
+        *PYTEST_HARDENING_FLAGS,
+        *runnable,
+        "-v",
+    ]
+
+
+def pytest_trust_surface(
+    selectors: Iterable[str], repo_root: pathlib.Path | None = None
+) -> list[str]:
+    """conftest/ini files pytest would consult for ``selectors``.
+
+    For each selector's path component, collects every ``conftest.py``
+    and pytest ini basename (`_PYTEST_INI_BASENAMES`) that EXISTS on the
+    directory chain from ``repo_root`` down to the selector's directory
+    (pytest loads conftests along collected paths' ancestry, and its
+    rootdir/ini discovery walks the args' ancestor chain). Directory
+    selectors additionally contribute nested ``conftest.py`` /
+    ``pytest.ini`` files under the directory (pytest loads per-subdir
+    conftests during collection).
+
+    Returns sorted repo-root-relative POSIX paths of EXISTING files
+    only — this is the surface whose provenance
+    `untrusted_pytest_trust_surface` grades.
+    """
+    if repo_root is None:
+        repo_root = _repo_root()
+    repo_root = pathlib.Path(repo_root)
+
+    dirs: set[pathlib.Path] = {repo_root}
+    files_direct: set[pathlib.Path] = set()
+    for selector in selectors:
+        path_part = selector.split("::", 1)[0].strip()
+        if not path_part or any(ch.isspace() for ch in path_part):
+            continue
+        candidate = repo_root / path_part
+        rel = pathlib.PurePosixPath(path_part)
+        parts = rel.parts if candidate.is_dir() else rel.parts[:-1]
+        cur = repo_root
+        for part in parts:
+            cur = cur / part
+            dirs.add(cur)
+        if candidate.is_dir():
+            files_direct.update(candidate.rglob(_PYTEST_CONFTEST_BASENAME))
+            files_direct.update(candidate.rglob("pytest.ini"))
+
+    for d in dirs:
+        for name in (_PYTEST_CONFTEST_BASENAME, *_PYTEST_INI_BASENAMES):
+            f = d / name
+            if f.is_file():
+                files_direct.add(f)
+
+    found: set[str] = set()
+    resolved_root = repo_root.resolve()
+    for f in files_direct:
+        if not f.is_file():
+            continue
+        try:
+            found.add(f.resolve().relative_to(resolved_root).as_posix())
+        except ValueError:
+            continue
+    return sorted(found)
+
+
+def _git_capture_lines(
+    args: list[str], cwd: pathlib.Path
+) -> list[str] | None:
+    """Run a git command; return stdout lines, or None on any failure.
+
+    None (as opposed to ``[]``) signals "git could not answer" — callers
+    in the SC8 trust check fail CLOSED on None (everything untrusted)
+    because a repo where provenance cannot be established cannot grant
+    trust.
+    """
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return (completed.stdout or "").splitlines()
+
+
+def _strip_porcelain_quotes(path_field: str) -> str:
+    """Unquote a ``git status --porcelain`` path field (best-effort)."""
+    path_field = path_field.strip()
+    if len(path_field) >= 2 and path_field[0] == '"' and path_field[-1] == '"':
+        path_field = path_field[1:-1]
+    return path_field
+
+
+def untrusted_pytest_trust_surface(
+    selectors: Iterable[str], repo_root: pathlib.Path | None = None
+) -> list[str]:
+    """Trust-surface files whose green run must NOT be trusted.
+
+    A `pytest_trust_surface` file is untrusted unless it is BOTH
+    tracked in git (``git ls-files`` — immune to .gitignore games:
+    an ignored conftest never shows in status but is also not
+    tracked) AND clean in ``git status --porcelain`` (covers
+    unstaged + staged modifications + deletions vs HEAD).
+
+    Fail-closed: if git itself cannot answer (not a repo, git missing),
+    the ENTIRE existing surface is returned untrusted — provenance that
+    cannot be established cannot grant trust. An EMPTY surface (no
+    conftest/ini anywhere on the chains) returns ``[]``: with nothing
+    to collude through, green is green.
+    """
+    if repo_root is None:
+        repo_root = _repo_root()
+    repo_root = pathlib.Path(repo_root)
+    surface = pytest_trust_surface(selectors, repo_root)
+    if not surface:
+        return []
+
+    tracked = _git_capture_lines(["ls-files", "--", *surface], repo_root)
+    status = _git_capture_lines(
+        ["status", "--porcelain", "--untracked-files=all", "--", *surface],
+        repo_root,
+    )
+    if tracked is None or status is None:
+        return list(surface)
+
+    tracked_set = {line.strip() for line in tracked if line.strip()}
+    dirty: set[str] = set()
+    for line in status:
+        if len(line) < 4:
+            continue
+        path_field = line[3:]
+        if " -> " in path_field:
+            old, _, new = path_field.partition(" -> ")
+            dirty.add(_strip_porcelain_quotes(old))
+            dirty.add(_strip_porcelain_quotes(new))
+        else:
+            dirty.add(_strip_porcelain_quotes(path_field))
+
+    return [p for p in surface if p not in tracked_set or p in dirty]
+
+
 
 #: Default Sonnet model alias used when ``OVERNIGHT_SONNET_REVIEW_MODEL``
 #: is not set. The SDK accepts either the short alias (``"sonnet"``) or
