@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# bin/lessons — per-plan lessons.md CLI wrapper (implplan §M.impl.5).
+#
+# POSIX shell wrapper that activates the project venv and dispatches to
+# `python -m bin._lessons.main`. All subcommands + flags are owned by the
+# Python entry point; this wrapper exists only to centralize venv
+# activation + repo-root resolution.
+#
+# Subcommands:
+#   add <slug> --task <id> --title "<text>" --approach "<text>"
+#     --failure "<text>" --rejection "<text>" --reattempt "<text>"
+#     --source "<ref>" [--dry-run] [--json]
+#   query <slug> [--task <id>] [--keyword <kw>] [--json] [--strict]
+#   list [--slug <slug>] [--recent N] [--json]
+#
+# Exit codes (per implplan §A.impl.3a):
+#   0  success
+#   1  usage
+#   2  plan_not_found
+#   4  schema_rejected
+#   7  atomic_write_failed
+#   36 lessons_required_field_missing
+#   37 lessons_entry_malformed
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Preserve the invoking directory for bin/_env_paths.project_root():
+# the cd below moves to the plugin/checkout root, which in installed-
+# plugin mode is NOT the adopter repo whose lessons.md we read/write.
+export SPLOCK_CALLER_PWD="${SPLOCK_CALLER_PWD:-$PWD}"
+cd "$REPO_ROOT"
+
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec "$(command -v python || command -v python3)" -m bin._lessons.main "$@"
