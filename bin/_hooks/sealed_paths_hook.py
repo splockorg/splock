@@ -223,21 +223,13 @@ def main() -> int:
         _hook_log("blocked", f"plan-doc raw-edit ({closed}) path={file_path}")
         return 0
 
-    # Load canonical inventory. SPLOCK_SEALED_PATHS_FILE override for tests.
-    # Default: prefer cwd-relative `.claude/hooks/sealed_paths.txt`; if
-    # absent, fall back to the repo where this module lives.
-    override = os.environ.get("SPLOCK_SEALED_PATHS_FILE", "").strip()
-    if override:
-        sealed_file = Path(override)
-    else:
-        cwd_candidate = Path(".claude/hooks/sealed_paths.txt")
-        if cwd_candidate.exists():
-            sealed_file = cwd_candidate
-        else:
-            sealed_file = (
-                Path(__file__).resolve().parent.parent.parent
-                / ".claude" / "hooks" / "sealed_paths.txt"
-            )
+    # Load canonical inventory. Resolution (incl. the SPLOCK_SEALED_PATHS_FILE
+    # test override) lives in one place — this module used to hardcode the
+    # `.claude/hooks/` layout, which does not exist in this fork, so it always
+    # took the `FileNotFoundError -> allow` branch below and failed OPEN.
+    from bin._hooks import sealed_paths_file
+
+    sealed_file = sealed_paths_file()
     try:
         patterns = load_sealed_paths(sealed_file)
     except FileNotFoundError:
