@@ -1,0 +1,46 @@
+# The always-on green gate. Until this file existed, the 800-test suite ran
+# only on maintainers' machines, and every test gated on "origin CI" was dead
+# code — including the history-hygiene assertions, whose invariant had been
+# silently violated on public main since June.
+#
+# What this does NOT cover, by design: the `claude` CLI is not installed here,
+# so the CLI-backed smoke-battery tests (plugin validate, the marketplace
+# round-trip) skip — local runs remain the only coverage for CLI behavior,
+# which is exactly why the suite's operator-state isolation is load-bearing.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The history ratchet (test_no_new_personal_identity_in_history)
+          # walks every commit on every ref; a shallow clone would blind it.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install test dependencies
+        # The suite's only third-party imports are pytest + jsonschema; the
+        # SDK deps (requirements-sdk.txt) are lazily imported and stubbed in
+        # tests, so installing them here would only mask a missing-dep error
+        # an adopter would hit.
+        run: python -m pip install pytest jsonschema
+
+      - name: Test suite
+        run: python -m pytest -p no:randomly -q
+
+      - name: Trace-grep gate (host-identity scrub)
+        run: bash tests/trace_grep.sh
+
+      - name: Hook lint
+        run: python -m bin._hooks.hook_lint --check
