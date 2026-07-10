@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import pathlib
 import sys
 
@@ -193,6 +194,14 @@ def test_resolve_works_with_console_and_dal_absent(tmp_path):
         "CLAUDE_PLUGIN_DATA": str(tmp_path),
         "PATH": "/usr/bin:/bin",
         "PYTHONDONTWRITEBYTECODE": "1",
+        # A minimal env drops the session-wide log-root redirect; if this
+        # child (or a future edit of it) ever emits a structured log, it
+        # would land in the operator's real ~/.claude/logs. Carry it through.
+        **{
+            k: os.environ[k]
+            for k in ("HOOK_LOG_ROOT", "CLI_LOG_ROOT")
+            if k in os.environ
+        },
     }
     result = subprocess.run(
         [sys.executable, "-c", script],

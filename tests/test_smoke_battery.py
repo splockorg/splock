@@ -49,12 +49,27 @@ HOOKS_JSON = REPO_ROOT / "hooks" / "hooks.json"
 SEALED_PATHS_TXT = REPO_ROOT / "hooks" / "sealed_paths.txt"
 CLI_VERSION_DOC = REPO_ROOT / "docs" / "CLI_VERSION.md"
 
-#: Snapshot of the operator's real plugin registry, taken before any test runs.
-#: The CLI round-trip below asserts it is byte-for-byte untouched afterwards.
-_REAL_REGISTRY = Path.home() / ".claude" / "plugins" / "known_marketplaces.json"
-_REAL_REGISTRY_MTIME_AT_IMPORT = (
-    _REAL_REGISTRY.stat().st_mtime if _REAL_REGISTRY.is_file() else None
-)
+#: Byte snapshot of the operator's real plugin registry, taken at module
+#: import. The CLI round-trip below asserts both files are byte-for-byte
+#: untouched afterwards. Bytes, not mtime: mtime can survive a content change
+#: on coarse-timestamp filesystems, and a file CREATED after import (absent →
+#: present) must also count as a mutation. The original incident destroyed
+#: `known_marketplaces.json` AND `installed_plugins.json` — watch both.
+#: (`tests/conftest.py` adds the session-level sha256 backstop that fires even
+#: when this module's tests are skipped or deselected.)
+_REAL_PLUGINS_DIR = Path.home() / ".claude" / "plugins"
+_GUARDED_REGISTRY_FILES = ("known_marketplaces.json", "installed_plugins.json")
+
+
+def _real_registry_bytes() -> dict[str, bytes | None]:
+    snapshot: dict[str, bytes | None] = {}
+    for name in _GUARDED_REGISTRY_FILES:
+        path = _REAL_PLUGINS_DIR / name
+        snapshot[name] = path.read_bytes() if path.is_file() else None
+    return snapshot
+
+
+_REAL_REGISTRY_BYTES_AT_IMPORT = _real_registry_bytes()
 
 # Personal-identity tokens that MUST NOT appear in git history (or anywhere).
 FORBIDDEN_IDENTITY = (
@@ -139,7 +154,7 @@ def test_hooks_json_is_valid_json() -> None:
     assert "hooks" in hooks, "hooks.json must declare a 'hooks' object"
 
 
-def test_claude_plugin_validate_strict_passes_when_cli_present() -> None:
+def test_claude_plugin_validate_strict_passes_when_cli_present(tmp_path) -> None:
     """`claude plugin validate . --strict` exits 0 (CLI gate).
 
     Skipped (not failed) when the CLI is not installed — the structural JSON
@@ -148,9 +163,20 @@ def test_claude_plugin_validate_strict_passes_when_cli_present() -> None:
     cli = _claude_cli()
     if cli is None:
         pytest.skip("claude CLI not on PATH; structural manifest checks cover the floor")
+    # Same sandbox as the round-trip test below: the CLI touches its own state
+    # (`.claude.json`, backups) on every startup, and validate needs none of
+    # the operator's real config to judge the repo at cwd.
+    fake_home = tmp_path / "home"
+    config_dir = fake_home / ".claude"
+    config_dir.mkdir(parents=True)
     proc = subprocess.run(
         [cli, "plugin", "validate", ".", "--strict"],
         cwd=str(REPO_ROOT),
+        env={
+            **os.environ,
+            "HOME": str(fake_home),
+            "CLAUDE_CONFIG_DIR": str(config_dir),
+        },
         capture_output=True,
         text=True,
         timeout=60,
@@ -224,8 +250,14 @@ def test_marketplace_consumer_roundtrip_when_cli_present(tmp_path) -> None:
             timeout=60,
         )
 
-    # Nothing of the operator's may be visible from inside the sandbox.
+    # Nothing of the operator's may be visible from inside the sandbox. The
+    # exit code matters too: a `list` that errors out with empty stdout would
+    # otherwise "pass" this check with the isolation premise unverified.
     listed = _run("marketplace", "list")
+    assert listed.returncode == 0, (
+        f"sandboxed `marketplace list` failed (rc={listed.returncode}); cannot "
+        f"verify isolation before mutating anything:\n{listed.stdout}\n{listed.stderr}"
+    )
     assert "splock" not in listed.stdout, (
         "the sandboxed registry can see the operator's marketplaces; "
         f"CLAUDE_CONFIG_DIR is not being honoured:\n{listed.stdout}"
@@ -240,18 +272,31 @@ def test_marketplace_consumer_roundtrip_when_cli_present(tmp_path) -> None:
         assert installed.returncode == 0, (
             f"install failed:\n{installed.stdout}\n{installed.stderr}"
         )
-        # The round-trip landed in the SANDBOX...
-        assert any(config_dir.rglob("*.json")), "sandbox registry was never written"
+        # The round-trip landed in the SANDBOX. Assert on the specific
+        # registry artifact the CLI writes — `any(rglob("*.json"))` was
+        # vacuous, because the pre-check's own `marketplace list` already
+        # creates `.claude.json` (+ a backup) inside the sandbox.
+        sandbox_registry = config_dir / "plugins" / "known_marketplaces.json"
+        assert sandbox_registry.is_file(), (
+            "the sandbox plugin registry was never written; `marketplace add` "
+            "landed somewhere else"
+        )
+        assert "splock" in sandbox_registry.read_text(encoding="utf-8"), (
+            "the sandbox registry exists but does not record the splock "
+            "marketplace this test just added"
+        )
     finally:
         _run("uninstall", "splock@splock")
         _run("marketplace", "remove", "splock")
 
-    # ...and never in the operator's real one.
-    if _REAL_REGISTRY_MTIME_AT_IMPORT is not None:
-        assert _REAL_REGISTRY.stat().st_mtime == _REAL_REGISTRY_MTIME_AT_IMPORT, (
-            "this test mutated the operator's real plugin registry "
-            f"({_REAL_REGISTRY})"
-        )
+    # ...and never in the operator's real one — byte-for-byte, both files,
+    # including creation of a previously-absent file.
+    assert _real_registry_bytes() == _REAL_REGISTRY_BYTES_AT_IMPORT, (
+        "this test mutated the operator's real plugin registry under "
+        f"{_REAL_PLUGINS_DIR}. (If the diff is only `lastUpdated` timestamps, "
+        "a live Claude Code session may have refreshed marketplaces mid-run — "
+        "rerun to confirm before hunting further.)"
+    )
 
 
 # ---------------------------------------------------------------------------

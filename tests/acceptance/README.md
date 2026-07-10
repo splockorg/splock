@@ -6,8 +6,9 @@ unit/integration tests don't cover (cross-CLI seams, recovery
 state-machines, negative-claim conformance, cross-surface consistency
 audits).
 
-**Source-of-truth inventory:**
-`docs/plans/splock/splock_acceptance_inventory.md`
+**Source-of-truth inventory:** the inventory this suite was written against
+lives in the origin repo's plan history and is not carried here; the block
+map below (§A–§M) is the shipped reference.
 
 ## Run
 

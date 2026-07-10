@@ -87,13 +87,28 @@ def pytest_configure(config):
 # depth — if you reach into them, they'll be there; if you don't, this
 # fixture cleans them silently.
 
+#: Names no real splock operation ever writes — safe to delete wholesale.
+#: (`_acceptance_*` cannot be a real slug: the slug schema forbids a leading
+#: underscore. The two `*-slug` names are synthetic test fixtures.)
 _ACCEPTANCE_RESIDUE_PATTERNS: tuple[str, ...] = (
-    "docs/plans/_acceptance_*",                     # owned by this suite's tests
-    "docs/plans/acceptance_*",                      # owned by Pass 7 tests (slug schema forbids leading `_`)
-    "docs/plans/synthetic-chain-slug",              # pre-existing test_retry_loop leak
-    "docs/plans/test-retry-loop-slug",              # pre-existing test_retry_loop leak
+    "docs/plans/_acceptance_*",         # owned by this suite's tests
+    "docs/plans/synthetic-chain-slug",  # pre-existing test_retry_loop leak
+    "docs/plans/test-retry-loop-slug",  # pre-existing test_retry_loop leak
+)
+
+#: Leak targets whose paths REAL splock operation ALSO writes: halt_handoff
+#: queues triage handoffs at `docs/plans/<slug>/morning-review/<date>.md`
+#: (§H.2), marker routing writes `scheduled_markers/morning-review/`, and an
+#: operator slug may legitimately start with `acceptance_`. Deleting these
+#: wholesale is the same name-collision-in-cleanup mistake that once deleted
+#: two operators' real plugin installs. Instead: snapshot what exists at
+#: session start; at session end remove ONLY files this session created.
+#: Pre-existing operator data is never touched (so residue from a crashed
+#: prior run survives as git-status noise — the safe direction to fail).
+_COLLISION_PRONE_RESIDUE_PATTERNS: tuple[str, ...] = (
+    "docs/plans/acceptance_*",                      # Pass 7 tests, but a real slug could match
     "docs/plans/scheduled_markers/morning-review",  # marker-route leak target
-    "docs/plans/splock/morning-review",    # halt_handoff leak target
+    "docs/plans/splock/morning-review",             # halt_handoff leak target
 )
 
 
@@ -103,7 +118,7 @@ def _repo_root_path() -> Path:
 
 
 def _purge_residue() -> list[str]:
-    """Delete known §F residue paths. Returns list of paths actually removed."""
+    """Delete known test-owned §F residue paths. Returns paths actually removed."""
     import shutil
 
     repo_root = _repo_root_path()
@@ -124,9 +139,47 @@ def _purge_residue() -> list[str]:
     return removed
 
 
+def _collision_prone_files() -> set[Path]:
+    """Every file currently under a collision-prone residue pattern."""
+    repo_root = _repo_root_path()
+    found: set[Path] = set()
+    for pattern in _COLLISION_PRONE_RESIDUE_PATTERNS:
+        for path in repo_root.glob(pattern):
+            if path.is_file():
+                found.add(path)
+            elif path.is_dir():
+                found.update(p for p in path.rglob("*") if p.is_file())
+    return found
+
+
+def _purge_session_created(preexisting: set[Path]) -> list[str]:
+    """Remove collision-prone files created during this session; keep the rest.
+
+    Directories are pruned only when the purge leaves them empty — a dir
+    holding pre-existing operator files stays intact.
+    """
+    repo_root = _repo_root_path()
+    removed: list[str] = []
+    created = _collision_prone_files() - preexisting
+    for path in sorted(created):
+        try:
+            path.unlink()
+            removed.append(str(path.relative_to(repo_root)))
+        except OSError:
+            continue
+        parent = path.parent
+        while parent != repo_root:
+            try:
+                parent.rmdir()  # fails (correctly) unless empty
+            except OSError:
+                break
+            parent = parent.parent
+    return removed
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _acceptance_residue_cleanup():
-    """Nuke known §F-gap residue at session start AND end.
+    """Purge test-owned residue; never delete pre-existing operator data.
 
     Per the test-isolation gap surfaced in Pass 2-5 findings + the
     in-flight orchestrator agent's coordination handoff. Defensive
@@ -138,8 +191,9 @@ def _acceptance_residue_cleanup():
         print(
             f"\n[acceptance-cleanup] purged {len(start_removed)} residue paths at session start"
         )
+    preexisting = _collision_prone_files()
     yield
-    end_removed = _purge_residue()
+    end_removed = _purge_residue() + _purge_session_created(preexisting)
     if end_removed:
         print(
             f"\n[acceptance-cleanup] purged {len(end_removed)} residue paths at session end"
