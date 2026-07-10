@@ -150,6 +150,12 @@ def main(argv: list[str] | None = None) -> int:
     # `human_notes_content` arg to `render_canonical_body`; no separate
     # insertion step required.
 
+    # Glyph tripwire before any output path: model-derived text is where
+    # mojibake shows up, and the MD twin is what operators actually read.
+    # Warning only — the render itself proceeds regardless.
+    from bin._text_hygiene import warn_mojibake
+    warn_mojibake(rendered, str(paths.md_path))
+
     # --dry-run + --check short-circuit before write.
     if args.dry_run:
         sys.stdout.write(rendered)
