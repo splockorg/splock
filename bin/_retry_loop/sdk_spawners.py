@@ -326,6 +326,7 @@ import subprocess
 import sys
 from typing import Any, AsyncIterator, Iterable, Protocol
 
+from bin._sdk_bridge import strip_schema_meta_keys
 from bin._verify_plan.strict import (
     TYPED_GATE_COMMAND_PREFIX,
     task_verification_exemption,
@@ -1933,10 +1934,13 @@ def spawn_reviewer_via_sdk(
 
     options = ClaudeAgentOptions(
         model=model,
-        output_format={
+        # The rubric constant declares the 2020-12 meta-schema, which the
+        # live CLI's schema validator rejects at startup — strip at the
+        # transport boundary (see bin._sdk_bridge.strip_schema_meta_keys).
+        output_format=strip_schema_meta_keys({
             "type": "json_schema",
             "schema": TEST_STEP_RUBRIC_SCHEMA_V1,
-        },
+        }),
         agents={_REVIEWER_AGENT_NAME: reviewer_agent_def},
         cwd=str(cwd),
         env=merged_env,

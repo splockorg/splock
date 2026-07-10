@@ -196,6 +196,40 @@ def _try_extract_json_object(text: str) -> dict | None:
 # Message / result helpers
 # ----------------------------------------------------------------------
 
+def strip_schema_meta_keys(output_format: Any) -> Any:
+    """Return ``output_format`` with JSON-Schema meta keys removed from its schema.
+
+    The ``claude`` CLI validates its structured-output schema with a validator
+    that has NO 2020-12 meta-schema registered, so any schema declaring
+    ``"$schema": "https://json-schema.org/draft/2020-12/schema"`` is rejected
+    at CLI startup::
+
+        Error: --json-schema is not a valid JSON Schema: no schema with key
+        or ref "https://json-schema.org/draft/2020-12/schema"
+
+    — which surfaces as an opaque ``ProcessError: exit code 1`` from the SDK's
+    initialize control request. Every schema this repo ships (``schemas/*.json``,
+    the ``rubric.py`` constants) declares 2020-12, so every live constrained
+    emission — plan/implplan Call 2, the reviewer rubric binding, the verifier
+    verdict — failed against the real CLI while passing against mocks and
+    inline test fragments (which carry no ``$schema``).
+
+    ``$schema`` and ``$id`` are declarations, not constraints; constrained
+    decoding neither needs nor uses them. Stripped at the transport boundary
+    so the shipped schema files stay fully-declared for the in-repo
+    ``jsonschema`` validators. Non-dict inputs pass through untouched.
+    """
+    if not isinstance(output_format, dict):
+        return output_format
+    schema = output_format.get("schema")
+    if not isinstance(schema, dict):
+        return output_format
+    if "$schema" not in schema and "$id" not in schema:
+        return output_format
+    cleaned = {k: v for k, v in schema.items() if k not in ("$schema", "$id")}
+    return {**output_format, "schema": cleaned}
+
+
 def _last_user_text(messages: Any) -> str:
     """Pull the user prompt string out of an Anthropic-style ``messages`` list.
 
@@ -328,7 +362,7 @@ class _Messages:
         return options_cls(
             model=model,
             system_prompt=system,
-            output_format=output_format,
+            output_format=strip_schema_meta_keys(output_format),
             allowed_tools=[],
             setting_sources=None,
             cwd=str(self._owner._cwd),
