@@ -1439,6 +1439,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from bin._render_plan.atomic_write import write_atomic
         write_atomic(reasoning_target, result.call1_reasoning_md)
+        # Model text hitting disk verbatim is where glyph corruption shows
+        # up (the JSON emit is ensure_ascii-escaped and immune). Warn, so
+        # the operator proofreads a pointed line instead of the whole file.
+        from bin._text_hygiene import warn_mojibake
+        warn_mojibake(result.call1_reasoning_md, str(reasoning_target))
     except Exception:  # noqa: BLE001 — best-effort; don't fail the CLI
         pass
 
