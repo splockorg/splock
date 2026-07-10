@@ -65,8 +65,16 @@ def _session_id(env: Optional[dict] = None) -> str:
 
 
 def _counter_dir(home_override: Optional[Path] = None) -> Path:
-    base = home_override or Path(os.path.expanduser("~"))
-    return base / ".claude" / "logs"
+    if home_override is not None:
+        return home_override / ".claude" / "logs"
+    # The counters are colocated with the CLI structured logs, so honour the
+    # same redirect (`log_emit` semantics: the env var names the logs dir
+    # itself). Without this, a test-spawned child wrote counter files into
+    # the operator's real ~/.claude/logs despite the session-wide redirect.
+    override = os.environ.get("CLI_LOG_ROOT", "").strip()
+    if override:
+        return Path(override)
+    return Path(os.path.expanduser("~")) / ".claude" / "logs"
 
 
 def _session_counter_path(home_override: Optional[Path] = None,

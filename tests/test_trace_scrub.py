@@ -65,13 +65,19 @@ EXTS = ["*.py", "*.json", "*.yaml", "*.yml", "*.md", "*.txt", "*.sh", "*.example
 
 
 def _purge_binary_artifacts() -> None:
-    """Remove __pycache__/, *.pyc, .pytest_cache BEFORE any grep."""
+    """Remove __pycache__/, *.pyc, .pytest_cache BEFORE any grep.
+
+    `.venv` is excluded like `.git`: it is not scrub-scoped, and deleting a
+    virtualenv's bytecode out from under the interpreter running this suite
+    (operators do run it from inside a live plugin install) is not this
+    gate's business.
+    """
     for d in REPO_ROOT.rglob("__pycache__"):
-        if ".git" in d.parts:
+        if ".git" in d.parts or ".venv" in d.parts:
             continue
         subprocess.run(["rm", "-rf", str(d)], check=False)
     for f in REPO_ROOT.rglob("*.pyc"):
-        if ".git" in f.parts:
+        if ".git" in f.parts or ".venv" in f.parts:
             continue
         f.unlink(missing_ok=True)
     subprocess.run(["rm", "-rf", str(REPO_ROOT / ".pytest_cache")], check=False)
