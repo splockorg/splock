@@ -15,8 +15,10 @@ binds each to a real, runnable assertion in the assembled tree:
     plan-substrate path);
   * a marker schema round-trip (build a representative row, validate it against
     ``marker_v1``, and confirm a corrupted row is rejected);
-  * git-provenance assertions (exactly one commit, authored by the public org
-    identity, with no personal email anywhere in the history);
+  * a git-provenance ratchet: no NEW commit carries a personal identity
+    (two pre-existing leaks on public main are grandfathered by SHA; the
+    frozen-release single-commit assertions are retired — the repo is a
+    living fork now);
   * the CLI-version doc exists and documents the minimum CLI version.
 
 The plugin-validate + marketplace-round-trip gates degrade to a structural
@@ -64,45 +66,34 @@ FORBIDDEN_IDENTITY = (
     "billstagg",
 )
 
-# The settled public commit identity (per the repo-local git config).
-PUBLIC_AUTHOR_EMAIL = "splockorg@users.noreply.github.com"
-
-
 # ---------------------------------------------------------------------------
-# Release-state history-hygiene gate.
+# History hygiene.
 #
-# The three provenance assertions below (exactly-one-commit, org-identity
-# author/committer, no personal identity anywhere) describe the FROZEN
-# single-squashed-release state of the canonical origin repo. They fail by
-# construction on any working checkout — local dev commits, contributor
-# forks, adopter clones — so running them there is noise, not signal. Scope
-# them to the origin CI, where the release state is real, so local/PR-branch
-# scrub runs stay green.
+# The initial release shipped as a single squashed commit, and two further
+# provenance assertions (exactly-one-commit, org-noreply author) pinned that
+# FROZEN state behind a CI-on-origin gate that nothing ever enabled — no
+# workflow existed, so they never ran anywhere; had CI been added unchanged,
+# they would have failed by construction the moment the fork took its first
+# PR. Both are retired: the repo is a living fork with a public multi-author
+# history now, and that is the intended state.
 #
-# Enforced when EITHER:
-#   * SPLOCK_ENFORCE_HISTORY_HYGIENE=1 is set (the origin CI workflow sets
-#     this), OR
-#   * we are in GitHub Actions on the canonical repo (splockorg/splock).
-# Skipped everywhere else.
+# What remains load-bearing — and now runs EVERYWHERE, not behind a dead
+# gate — is that the ORIGINAL author's personal identity never appears in
+# history. Ungating it immediately found two violations already on public
+# main (below), which had sat unnoticed since June precisely because the
+# guard never ran. Purging them requires rewriting published history — a
+# maintainer decision, not a test's — so they are grandfathered by exact
+# SHA and the invariant becomes a RATCHET: no NEW commit may carry the
+# identity. Do not add to this set.
 # ---------------------------------------------------------------------------
-def _is_ci_on_origin() -> bool:
-    if os.environ.get("SPLOCK_ENFORCE_HISTORY_HYGIENE") == "1":
-        return True
-    return (
-        os.environ.get("GITHUB_ACTIONS") == "true"
-        and os.environ.get("GITHUB_REPOSITORY", "").lower() == "splockorg/splock"
-    )
-
-
-_release_hygiene_gate = pytest.mark.skipif(
-    not _is_ci_on_origin(),
-    reason=(
-        "release-state history hygiene runs only in origin CI "
-        "(set SPLOCK_ENFORCE_HISTORY_HYGIENE=1, or run in splockorg/splock "
-        "GitHub Actions); the frozen single-commit assertions fail by "
-        "construction on any working checkout"
-    ),
-)
+KNOWN_IDENTITY_LEAKS = frozenset({
+    # docs: document dev venv (2026-06-03) — authored + committed with the
+    # personal gmail identity.
+    "c48974941aac3095e1fba4952530bff773bb65fc",
+    # fix: caller-pwd project resolution (2026-07-08) — authored with the
+    # personal work identity, committed by the adopter.
+    "fa1372b48002884cce890792e9e4789e981910f0",
+})
 
 
 def _claude_cli() -> str | None:
@@ -455,30 +446,31 @@ def _git(*args: str) -> str:
     ).stdout
 
 
-@_release_hygiene_gate
-def test_exactly_one_commit() -> None:
-    """The public history is a single squashed commit."""
-    count = _git("rev-list", "--count", "HEAD").strip()
-    assert count == "1", f"expected exactly 1 commit, found {count}"
+def test_no_new_personal_identity_in_history() -> None:
+    """No commit outside the grandfathered set carries a personal identity in
+    its author, committer, or message — across ALL refs, on every checkout.
 
-
-@_release_hygiene_gate
-def test_commit_author_is_public_org_identity() -> None:
-    """The sole commit is authored + committed by the org noreply identity."""
-    ae = _git("log", "-1", "--format=%ae").strip()
-    ce = _git("log", "-1", "--format=%ce").strip()
-    assert ae == PUBLIC_AUTHOR_EMAIL, f"author email {ae!r} != {PUBLIC_AUTHOR_EMAIL!r}"
-    assert ce == PUBLIC_AUTHOR_EMAIL, f"committer email {ce!r} != {PUBLIC_AUTHOR_EMAIL!r}"
-
-
-@_release_hygiene_gate
-def test_no_personal_identity_anywhere_in_history() -> None:
-    """No personal name/email appears in any commit's author, committer, or
-    message across the whole history.
+    A ratchet, not a statement of purity: ungating the old blob-level check
+    found two personal-identity commits already on public main (see
+    KNOWN_IDENTITY_LEAKS). Any NEW leak fails here, everywhere, immediately.
     """
-    blob = _git("log", "--all", "--format=%an%n%ae%n%cn%n%ce%n%B")
-    leaks = [tok for tok in FORBIDDEN_IDENTITY if tok in blob]
-    assert not leaks, f"personal identity leaked into git history: {leaks}"
+    rows = _git(
+        "log", "--all", "--format=%H%x00%an%x00%ae%x00%cn%x00%ce%x00%B%x01"
+    )
+    leaked: list[str] = []
+    for row in rows.split("\x01"):
+        row = row.strip("\n")
+        if not row:
+            continue
+        sha, _, rest = row.partition("\x00")
+        if any(tok in rest for tok in FORBIDDEN_IDENTITY):
+            if sha not in KNOWN_IDENTITY_LEAKS:
+                leaked.append(sha[:12])
+    assert not leaked, (
+        f"NEW personal-identity leak(s) in git history: {leaked}. "
+        "Re-author before pushing (the grandfathered set is closed — do not "
+        "extend it)."
+    )
 
 
 # ---------------------------------------------------------------------------
