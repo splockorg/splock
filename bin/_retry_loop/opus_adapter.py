@@ -144,16 +144,16 @@ def build_adapters(
       ``hook_env_staged``); explicit dict on the reviewer path so the
       env values flow even if the spawner's defaults change.
 
-    The ``rubric_kind`` kwarg passed to the reviewer adapter is
-    ACCEPTED-BUT-IGNORED by design — ratified per
-    ``spawner_signature_coordination`` §6.1 (keep accepted-but-
-    ignored). ``iteration_loop`` passes ``rubric_kind="test_step"``
-    because the legacy default-stub contract carries it
-    (``_default_spawn_reviewer`` signature in ``iteration_loop.py``
-    still accepts ``rubric_kind`` for the phase-boundary dry-run code
-    path). The SDK reviewer at ``spawn_reviewer_via_sdk`` always uses
-    ``TEST_STEP_RUBRIC_SCHEMA_V1``, so there is no schema-selector
-    behavior to wire today.
+    The ``rubric_kind`` kwarg passed to the reviewer adapter selects the
+    reviewer's bound output schema and is forwarded to
+    ``spawn_reviewer_via_sdk`` (which defaults it to ``"test_step"``).
+    ``iteration_loop`` passes ``rubric_kind="test_step"``; the
+    phase-boundary gate passes ``"plan_to_implplan"`` /
+    ``"implplan_to_code"``, whose rubrics carry the load-bearing
+    ``terminal_shape`` field. It was previously ACCEPTED-BUT-IGNORED
+    (``spawner_signature_coordination`` §6.1) — which crashed every
+    operator-direct ``bin/verify boundary`` run (``terminal_shape=None``);
+    the schema is now resolved via ``rubric.resolve_schema(rubric_kind)``.
 
     Parameters
     ----------
@@ -238,12 +238,15 @@ def build_adapters(
         prompt: str,
         rubric_kind: str,
     ) -> dict:
-        # rubric_kind is ACCEPTED-BUT-IGNORED — see module docstring +
-        # the §6.1 resolution. The SDK reviewer always uses
-        # TEST_STEP_RUBRIC_SCHEMA_V1 today.
+        # rubric_kind selects the reviewer's bound output schema: test_step
+        # vs the phase-boundary rubrics (plan_to_implplan / implplan_to_code),
+        # which carry a terminal_shape field. Previously ignored — that broke
+        # every operator-direct `bin/verify boundary` run (terminal_shape=None
+        # → exit 2). spawn_reviewer_via_sdk defaults to "test_step".
         return spawn_reviewer_via_sdk(
             prompt=prompt,
             cwd=bound_repo_root,
+            rubric_kind=rubric_kind,
             hook_env={
                 "SPLOCK_PLAN_SLUG": os.environ.get("SPLOCK_PLAN_SLUG", slug),
                 "SPLOCK_CHAIN_ID": os.environ.get("SPLOCK_CHAIN_ID", chain_id),
