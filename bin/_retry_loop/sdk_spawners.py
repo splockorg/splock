@@ -332,7 +332,7 @@ from bin._verify_plan.strict import (
     task_verification_exemption,
 )
 
-from .rubric import TEST_STEP_RUBRIC_SCHEMA_V1
+from .rubric import TEST_STEP_RUBRIC_SCHEMA_V1, resolve_schema
 
 logger = logging.getLogger(__name__)
 
@@ -1799,6 +1799,7 @@ def spawn_reviewer_via_sdk(
     hook_env: dict[str, str] | None = None,
     timeout_s: int = SDK_REQUEST_TIMEOUT_S,
     client: ClaudeAgentSDKClient | None = None,
+    rubric_kind: str = "test_step",
 ) -> dict[str, Any]:
     """Spawn a Sonnet reviewer via the claude-agent-sdk; return the rubric dict.
 
@@ -1819,8 +1820,9 @@ def spawn_reviewer_via_sdk(
     3. Build ``ClaudeAgentOptions`` with:
 
        - ``output_format = {"type": "json_schema", "schema":
-         TEST_STEP_RUBRIC_SCHEMA_V1}`` — binds the SDK's structured-
-         output retry layer to the rubric contract per §F.4.
+         resolve_schema(rubric_kind)}`` — binds the SDK's structured-
+         output retry layer to the rubric contract per §F.4 (test-step
+         vs the phase-boundary rubrics, which carry ``terminal_shape``).
        - ``agents = {"reviewer": <AgentDefinition>}`` — pre-registers
          the reviewer subagent.
        - ``model = <resolved Sonnet>`` — also pinned on the options
@@ -1939,7 +1941,13 @@ def spawn_reviewer_via_sdk(
         # transport boundary (see bin._sdk_bridge.strip_schema_meta_keys).
         output_format=strip_schema_meta_keys({
             "type": "json_schema",
-            "schema": TEST_STEP_RUBRIC_SCHEMA_V1,
+            # Select the reviewer's bound schema by rubric_kind. The
+            # phase-boundary rubrics (plan_to_implplan / implplan_to_code)
+            # carry a terminal_shape field that TEST_STEP_RUBRIC_SCHEMA_V1
+            # lacks; binding the test-step schema on a boundary review made
+            # terminal_shape_of() see None and crashed every operator-direct
+            # `bin/verify boundary` run (exit 2 driver_crash).
+            "schema": resolve_schema(rubric_kind),
         }),
         agents={_REVIEWER_AGENT_NAME: reviewer_agent_def},
         cwd=str(cwd),
