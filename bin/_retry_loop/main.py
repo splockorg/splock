@@ -31,8 +31,12 @@ Subcommands
   set (SC6 ``covers[]`` / default), classifies every covered
   ``tests_enabled`` entry via the ``pytest --collect-only`` oracle
   (typed gate commands recognized), prints the structured verdict as
-  JSON. Exit 0 = advance-ok; exit 10 (`EXIT_PHASE_BOUNDARY_HALT`) =
-  refuse advance (empty union or non-collectable entries).
+  JSON. ``test_gate`` junctions ONLY. Exit 0 = advance-ok; exit 10
+  (`EXIT_PHASE_BOUNDARY_HALT`) = refuse advance (empty union or
+  non-collectable entries); exit 38
+  (`EXIT_JUNCTION_KIND_NOT_APPLICABLE`) = the junction is a
+  ``review_gate``/``phase_boundary``, which clears by operator action,
+  not test collection (issue #39's fail-open).
 
 POSIX wrapper compatibility
 ---------------------------
@@ -145,14 +149,17 @@ def _build_parser() -> argparse.ArgumentParser:
     sp_junction = sub.add_parser(
         "junction",
         help=(
-            "Collect-check a junction's covering set before advance "
-            "(real_tests_at_junctions SC4): unions the covered tasks' "
-            "tests_enabled, probes selectors via `pytest --collect-only` "
-            "(typed gate_cmd: entries recognized, not probed), prints a "
-            "JSON verdict. Exit 0 = advance-ok; exit 10 "
+            "Collect-check a test_gate junction's covering set before "
+            "advance (real_tests_at_junctions SC4): unions the covered "
+            "tasks' tests_enabled, probes selectors via `pytest "
+            "--collect-only` (typed gate_cmd: entries recognized, not "
+            "probed), prints a JSON verdict. Exit 0 = advance-ok; exit 10 "
             "(EXIT_PHASE_BOUNDARY_HALT) = refuse advance (empty union or "
-            "non-collectable entries); exit 1 = usage (unknown "
-            "slug/junction, malformed orchestrator)."
+            "non-collectable entries); exit 38 "
+            "(EXIT_JUNCTION_KIND_NOT_APPLICABLE) = junction is a "
+            "review_gate/phase_boundary — clears by operator action, not "
+            "test collection; exit 1 = usage (unknown slug/junction, "
+            "malformed orchestrator)."
         ),
     )
     sp_junction.add_argument("slug", help="Plan slug.")
@@ -661,6 +668,11 @@ def _run_junction(args: argparse.Namespace) -> int:
       non-collectable entries. Reuses the §F gate-HALT slot — a junction
       test_gate refusing advance is structurally the same operator
       signal as a phase-boundary HALT.
+    - 38 (`EXIT_JUNCTION_KIND_NOT_APPLICABLE`) — the junction exists but
+      is a ``review_gate``/``phase_boundary``, not a ``test_gate``. The
+      collect-check does not apply; the gate clears by operator action.
+      Distinct from 0 AND 10 so a driver never reads "not applicable"
+      as "cleared" (issue #39's fail-open) or as "failed".
     - 1 (`EXIT_USAGE`) — unknown slug/junction id, malformed
       orchestrator, or covering-set resolution failure.
     - 2 (`EXIT_DRIVER_CRASH`) — unexpected exception.
@@ -680,12 +692,25 @@ def _run_junction(args: argparse.Namespace) -> int:
         OrchestratorJsonMissingError,
         SlugNotFoundError,
     )
-    from bin._retry_loop.sdk_spawners import junction_collect_check
+    from bin._retry_loop.sdk_spawners import (
+        JunctionKindNotApplicableError,
+        junction_collect_check,
+    )
 
     try:
         verdict = junction_collect_check(
             plan_dir, slug=args.slug, junction_id=args.junction
         )
+    except JunctionKindNotApplicableError as exc:
+        _emit_stderr_json(
+            {
+                "error": "junction_kind_not_applicable",
+                "junction_id": exc.junction_id,
+                "junction_kind": exc.kind,
+                "detail": str(exc),
+            }
+        )
+        return exit_codes.EXIT_JUNCTION_KIND_NOT_APPLICABLE
     except (
         ValueError,
         KeyError,

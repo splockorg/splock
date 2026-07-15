@@ -1448,6 +1448,29 @@ def classify_tests_enabled_entry(
     return collect_only_probe(entry, cwd=repo_root)
 
 
+class JunctionKindNotApplicableError(Exception):
+    """The named junction exists but is not a ``test_gate``.
+
+    The collect-check consolidates ``tests_enabled`` — a *test_gate*
+    semantic. Applying it to a ``review_gate`` or ``phase_boundary``
+    junction would fabricate a covering set and green-light an advance
+    no review/checkpoint ever cleared (issue #39's fail-open). Raised
+    instead of returning a verdict so the CLI can map it to a distinct
+    exit code: "gate not applicable here" is neither "gate passed" nor
+    "gate failed".
+    """
+
+    def __init__(self, junction_id: str, kind: str | None) -> None:
+        self.junction_id = junction_id
+        self.kind = kind
+        super().__init__(
+            f"junction {junction_id!r} is a {kind!r} junction; the "
+            f"collect-check applies to test_gate junctions only. A "
+            f"{kind!r} gate clears by operator action, not by test "
+            f"collection"
+        )
+
+
 def junction_collect_check(
     plan_dir: pathlib.Path,
     *,
@@ -1506,6 +1529,11 @@ def junction_collect_check(
         ``junctions[]``; or covering-set resolution failed (bogus
         ``covers[]`` entry / unresolvable ``after_task`` — propagated
         from `junction_covering_set`).
+    JunctionKindNotApplicableError
+        The junction exists but its ``kind`` is not ``test_gate``
+        (``review_gate`` / ``phase_boundary``). Those gates clear by
+        operator action; collect-checking them would fabricate a
+        covering set and fail open (issue #39).
     """
     # Lazy imports: both modules are SDK-free, but keeping them local
     # mirrors how main.py defers cross-package imports to call time.
@@ -1529,6 +1557,10 @@ def junction_collect_check(
             f"junction {junction_id!r} not found in {slug!r} orchestrator "
             f"(known junctions: {known})"
         )
+
+    kind = junction.get("kind")
+    if kind != "test_gate":
+        raise JunctionKindNotApplicableError(junction_id, kind)
 
     covering_set = junction_covering_set(orchestrator, junction)
 
