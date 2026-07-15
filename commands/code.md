@@ -231,19 +231,27 @@ WRAPPED_DIRECTIVE="$(bin/wrap --kind operator-directive --content "$directive")"
    1. **Junction-halt check** — BEFORE re-running the picker. Read
       `docs/plans/<slug>/<slug>_orchestrator.json` and scan its
       `junctions[]` array for entries where `after_task` equals the
-      just-completed task-id. The picker is unaware of junctions (per
-      `bin/_orchestrator_query/orchestrator_loader.py:9` — "junctions
-      ... opaque to the library"), and `/review` only covers the two
-      meta-boundaries (`plan_to_implplan`, `implplan_to_code`) — not
-      these intra-implplan junctions. So this halt MUST be enforced
-      in the skill loop. For each matching junction, emit one notice
-      keyed by `kind`:
+      just-completed task-id. The picker never halts on junctions (it
+      reads only the orchestrator's `tasks[]`; the loader's
+      `junction_covering_set` helper resolves covering sets but no
+      picker path consumes it — see
+      `bin/_orchestrator_query/orchestrator_loader.py`), and `/review`
+      only covers the two meta-boundaries (`plan_to_implplan`,
+      `implplan_to_code`) — not these intra-implplan junctions. So this
+      halt MUST be enforced in the skill loop. For each matching
+      junction, emit one notice keyed by `kind`:
 
       | kind | Notice template |
       |---|---|
       | `phase_boundary` | `Phase boundary <J-id> reached after <T-id> — commit/checkpoint Phase N work before re-invoking /code <slug>` |
       | `test_gate` | `Test gate <J-id> after <T-id> — run bin/verify junction <slug> --junction <J-id> (collect-check on the covering set), then /test <slug> before re-invoking /code <slug>` |
       | `review_gate` | `Review gate <J-id> after <T-id> — operator review required before re-invoking /code <slug>` |
+
+      `bin/verify junction` applies to `test_gate` junctions ONLY: on a
+      `review_gate` or `phase_boundary` id it refuses with exit 38
+      (`junction_kind_not_applicable`) rather than fabricating a
+      covering set — those gates clear by operator action, and exit 38
+      MUST be treated as "gate still open", never as advance-ok.
 
       Multiple junctions can fire on the same `after_task` (e.g., a
       task that ends a phase AND triggers a walkthrough test — emit

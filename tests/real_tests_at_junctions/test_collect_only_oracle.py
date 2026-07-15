@@ -34,6 +34,15 @@ truth, qa C.9) plus the junction-time covering-set hook:
                                      slug's REAL orchestrator J1 is
                                      advance-ok (via the CLI surface,
                                      exit 0).
+  6. wrong-kind-refusal (issue #39) — junction_collect_check refuses a
+                                     review_gate / phase_boundary
+                                     junction instead of fabricating a
+                                     test_gate covering set and failing
+                                     open; the CLI maps the refusal to
+                                     exit 38, distinct from advance-ok
+                                     (0) and gate-failed (10), and the
+                                     test_gate verdict keeps echoing
+                                     junction_kind.
 
 All synthetic modules are tmp_path-local and tiny; every probe runs with
 `-p no:cacheprovider` (pinned inside `collect_only_probe`) so subprocess
@@ -66,6 +75,7 @@ from bin._retry_loop.sdk_spawners import (
     COLLECT_NOT_COLLECTABLE,
     COLLECT_NOT_SELECTOR,
     COLLECT_TYPED_COMMAND,
+    JunctionKindNotApplicableError,
     classify_tests_enabled_entry,
     collect_only_probe,
     is_runnable_pytest_selector,
@@ -651,3 +661,93 @@ class TestJunctionHookUsesCoveringSet:
     # history, not framework code, and it is not carried here. The junction
     # hook's real behaviour is pinned by the synthetic covering-set tests
     # above; the CLI seam is pinned once `bin/verify junction` lands.
+
+
+# --------------------------------------------------------------------------- #
+# 6. wrong-kind-refusal (issue #39)                                            #
+# --------------------------------------------------------------------------- #
+
+
+class TestJunctionKindRefusal:
+    """The collect-check is a test_gate semantic: a review_gate /
+    phase_boundary junction must be REFUSED, not collect-checked. Before
+    this pin, a review_gate id got the test_gate default covering set
+    and could return advance_ok=True / exit 0 — a fail-open review gate
+    (issue #39)."""
+
+    def _plant(self, tmp_path, kind: str) -> Path:
+        plans_root = tmp_path / "docs" / "plans"
+        slug = "synthetic-junction-slug"
+        return _plant_plan_dir(
+            plans_root,
+            slug,
+            # Entries that WOULD classify advance-ok if the kind check
+            # were skipped — pins the fail-open regression precisely.
+            tasks=[
+                _task("T1", [f"{TYPED_GATE_COMMAND_PREFIX} true"]),
+                _task("T2", [f"{TYPED_GATE_COMMAND_PREFIX} true"]),
+            ],
+            junctions=[
+                {"id": "JR_review", "after_task": "T2", "kind": kind},
+            ],
+        )
+
+    def test_review_gate_refused_even_when_covering_set_would_pass(
+        self, tmp_path
+    ):
+        plan_dir = self._plant(tmp_path, "review_gate")
+        with pytest.raises(JunctionKindNotApplicableError) as excinfo:
+            junction_collect_check(
+                plan_dir,
+                slug="synthetic-junction-slug",
+                junction_id="JR_review",
+                repo_root=tmp_path,
+            )
+        assert excinfo.value.junction_id == "JR_review"
+        assert excinfo.value.kind == "review_gate"
+
+    def test_phase_boundary_refused(self, tmp_path):
+        plan_dir = self._plant(tmp_path, "phase_boundary")
+        with pytest.raises(JunctionKindNotApplicableError) as excinfo:
+            junction_collect_check(
+                plan_dir,
+                slug="synthetic-junction-slug",
+                junction_id="JR_review",
+                repo_root=tmp_path,
+            )
+        assert excinfo.value.kind == "phase_boundary"
+
+    def test_test_gate_verdict_echoes_junction_kind(self, tmp_path):
+        """The payload's junction_kind echo is load-bearing visibility:
+        it is how a caller confirms which kind it just gated on."""
+        plan_dir = self._plant(tmp_path, "test_gate")
+        verdict = junction_collect_check(
+            plan_dir,
+            slug="synthetic-junction-slug",
+            junction_id="JR_review",
+            repo_root=tmp_path,
+        )
+        assert verdict["junction_kind"] == "test_gate"
+        assert verdict["advance_ok"] is True
+
+    def test_cli_wrong_kind_exits_38_with_stderr_envelope(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Exit 38 (EXIT_JUNCTION_KIND_NOT_APPLICABLE) is distinct from
+        advance-ok (0), gate-failed (10), and usage (1) so a driver can
+        tell "gate not applicable here" from every other outcome; the
+        stderr envelope names the junction and its kind."""
+        self._plant(tmp_path, "review_gate")
+        monkeypatch.setattr(
+            main_mod, "_PLANS_DIR", tmp_path / "docs" / "plans"
+        )
+        rc = main_mod.main(
+            ["junction", "synthetic-junction-slug", "--junction", "JR_review"]
+        )
+        assert rc == exit_codes.EXIT_JUNCTION_KIND_NOT_APPLICABLE
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        envelope = json.loads(captured.err)
+        assert envelope["error"] == "junction_kind_not_applicable"
+        assert envelope["junction_id"] == "JR_review"
+        assert envelope["junction_kind"] == "review_gate"

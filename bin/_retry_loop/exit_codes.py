@@ -10,6 +10,7 @@ registry, implplan lines 452-528). §F's slot in the shared registry:
 | 10 | `phase_boundary_halt` | §F-owned for HALT verdicts per §F.impl.8 |
 | 17 | `retry_exceeded` | §F-owned for test-step + boundary cap exhaustion per §F.impl.3 |
 | 16 | `verify_plan_rejected` | shared — when the rubric schema is rejected at decode time |
+| 38 | `junction_kind_not_applicable` | §F-owned — `junction` subcommand asked about a non-test_gate junction (issue #39) |
 
 
 
@@ -76,6 +77,14 @@ reviewer_needs_revision, or test_step_retry); OR R4 == "yes-flagged"
 tampering. §F-owned in the shared registry per A.impl.3a + §F.impl.3 +
 §F.impl.7."""
 
+EXIT_JUNCTION_KIND_NOT_APPLICABLE = 38
+"""The `junction` subcommand named a junction that exists but is not a
+`test_gate` (`review_gate` / `phase_boundary`). Distinct from both 0
+("gate passed") and 10 ("gate failed") so a driver never treats "the
+collect-check does not apply here" as a cleared gate — the fail-open
+reported in issue #39. 38 is unclaimed across the family registries
+(cf. `_update_orchestrator`'s code-18 collision note)."""
+
 
 DRIVER_EMITTED_CODES = frozenset(
     {
@@ -87,6 +96,7 @@ DRIVER_EMITTED_CODES = frozenset(
         EXIT_PHASE_BOUNDARY_HALT,
         EXIT_VERIFY_PLAN_REJECTED,
         EXIT_RETRY_EXCEEDED,
+        EXIT_JUNCTION_KIND_NOT_APPLICABLE,
     }
 )
 
@@ -95,6 +105,7 @@ __all__ = [
     "DRIVER_EMITTED_CODES",
     "EXIT_ATOMIC_WRITE_FAILED",
     "EXIT_DRIVER_CRASH",
+    "EXIT_JUNCTION_KIND_NOT_APPLICABLE",
     "EXIT_OK",
     "EXIT_PHASE_BOUNDARY_HALT",
     "EXIT_RETRY_EXCEEDED",
