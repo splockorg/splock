@@ -22,6 +22,23 @@ This command runs the two-call planner against the slug's existing
 `docs/plans/<slug>/` directory. It produces `<slug>_plan.json` via
 `bin/plan` (POSIX shell wrapper around `python -m bin._planner.main plan`).
 
+## Auth & billing
+
+This planner runs on your Claude Code **subscription** by default. Every
+model call routes through the subscription transport bridge
+(`SubscriptionClient` in `_sdk_bridge.py`) to your local `claude` CLI — it
+does **not** read `ANTHROPIC_API_KEY` and does **not** bill the metered
+API. A missing `ANTHROPIC_API_KEY` is therefore the *correct* state, not a
+blocker: do NOT refuse to run, and do NOT fall back to "driving the planner
+by hand," on the grounds that no API key is set. The bridge even strips
+`ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` for the duration of each call
+so a stray key cannot silently force metered billing.
+
+The one real prerequisite is the `claude_agent_sdk` package (installed with
+`pip install -r requirements-sdk.txt`); if it is absent, `bin/plan` fails
+with exact install instructions. The "two distinct SDK calls" described
+below are two subscription round-trips — not two metered API requests.
+
 ## File-existence gate
 
 Per plan §1.C slash-command quick-reference, the gate logic:

@@ -23,6 +23,19 @@ It produces `<slug>_qa.md` for the recon subject, or `<slug>_qa_<subject>.md`
 for a non-recon subject, via `bin/qa` (POSIX shell wrapper around
 `python -m bin._qa.main qa`).
 
+## Auth & billing
+
+This reviewer runs on your Claude Code **subscription** by default. The qa
+model call routes through the subscription transport bridge
+(`SubscriptionClient` in `_sdk_bridge.py`) to your local `claude` CLI — it
+does **not** read `ANTHROPIC_API_KEY` and does **not** bill the metered
+API. A missing `ANTHROPIC_API_KEY` is therefore the *correct* state, not a
+blocker: do NOT refuse to run, and do NOT fall back to reviewing the
+artifact "by hand," on the grounds that no API key is set. The one real
+prerequisite is the `claude_agent_sdk` package (installed with
+`pip install -r requirements-sdk.txt`); if it is absent, `bin/qa` fails
+with exact install instructions.
+
 ## Re-run modes (append / new-file / overwrite)
 
 Per v2.7 §1.C, the only predecessor gate:
