@@ -7,7 +7,8 @@
 # activation + repo-root resolution.
 #
 # Subcommands:
-#   update <slug> [--stage S] [--status S] [--next N] [--actor A] [--note N] [--render]
+#   update <slug> [--stage S] [--status S] [--next N] [--actor A] [--note N]
+#                 [--spawn-directive TEXT] [--render]
 #   render [--write]
 #   state <slug>
 #   init [--hub <existing .md>]

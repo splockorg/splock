@@ -77,6 +77,20 @@ def test_hooks_never_raise_on_broken_hub(fleet_project, capsys):
     assert "fleet: auto-update skipped" in capsys.readouterr().err
 
 
+def test_stage_finished_clears_consumed_spawn_directive(fleet_project):
+    """A stored directive targets the stage that just ran: completion
+    consumes it (the prompt bay must never advertise stale context), while
+    a blocked halt keeps it for the retry/resume."""
+    engine.update(SLUG, stage="plan", status="ready", next_action="/plan",
+                  actor="op", spawn_directive="ingest the qa recs")
+    auto.stage_blocked(SLUG, "plan", note="halted")
+    assert engine.load_state(SLUG)["spawn_directive"] == "ingest the qa recs"
+    auto.stage_finished(SLUG, "plan")
+    state = engine.load_state(SLUG)
+    assert state["status"] == "ready" and state["next"] == "/implplan"
+    assert state["spawn_directive"] == ""
+
+
 # ---------------------------------------------------------------------------
 # the lifecycle verbs
 # ---------------------------------------------------------------------------

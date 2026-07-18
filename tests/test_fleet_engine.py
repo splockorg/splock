@@ -205,6 +205,84 @@ def test_render_write_touches_only_the_zones(fleet_project):
     assert hub_file.read_bytes() == before
 
 
+def test_spawn_directive_roundtrips_survives_merges_and_clears(fleet_project):
+    rc = fleet_main([
+        "update", SLUG, "--stage", "qa", "--status", "ready",
+        "--next", "/plan", "--actor", "op",
+        "--spawn-directive", "OPERATOR DIRECTIVES: ingest the qa recs in Call 1.",
+    ])
+    assert rc == exit_codes.EXIT_OK
+    state = json.loads(paths.state_path(SLUG).read_text(encoding="utf-8"))
+    assert state["spawn_directive"].startswith("OPERATOR DIRECTIVES")
+
+    # a partial update from another actor leaves the directive alone
+    assert fleet_main(["update", SLUG, "--status", "wip", "--actor", "t"]) == 0
+    assert engine.load_state(SLUG)["spawn_directive"].startswith("OPERATOR")
+
+    # "" clears by hand
+    assert fleet_main(["update", SLUG, "--spawn-directive", "", "--actor", "t"]) == 0
+    assert engine.load_state(SLUG)["spawn_directive"] == ""
+
+
+def test_render_prompts_ready_held_and_closed_dropped(fleet_project):
+    _mk_slug("alpha", stage="qa", status="ready", next_action="/plan",
+             spawn_directive="ingest the qa recs;\n  plan against the current tree")
+    _mk_slug("beta", stage="test", status="done", next_action="closeout")
+    _mk_slug("gamma", stage="test", status="blocked", blockers="cap exhausted")
+    _mk_slug("delta", stage="code", status="wip", next_action="/code")
+    _mk_slug("omega", stage="closeout", status="closed", next_action="—")
+    _mk_slug("sigma", stage="recon", status="ready", next_action="/splock:qa")
+
+    body = engine.render_zones()["prompts"]
+    # ready → runnable one-liners; the stored directive is an annotation,
+    # never part of the command (spawn applies it at spawn time)
+    assert "- `bin/fleet spawn alpha --stage plan`" in body
+    assert "- `bin/fleet spawn sigma --stage qa`" in body  # /splock: spelling
+    assert "--prompt-suffix" not in body
+    # multi-line directive collapses to one display line
+    assert "  - directive: ingest the qa recs; plan against the current tree" in body
+    # held group carries the blockers line
+    assert "- `gamma` — ❌ blocked: cap exhausted" in body
+    # wip / done / closed slugs never appear — closeout can't leave husks
+    for absent in ("beta", "delta", "omega"):
+        assert absent not in body
+
+
+def test_render_prompts_unspawnable_next_and_empty_placeholder(fleet_project):
+    assert "_Nothing to spawn" in engine.render_zones()["prompts"]
+    _mk_slug("alpha", stage="test", status="ready", next_action="operator ruling")
+    body = engine.render_zones()["prompts"]
+    assert "- `alpha` — next: operator ruling (not a stage command" in body
+    assert "bin/fleet spawn alpha" not in body
+
+
+def test_render_prompts_directive_display_clamped(fleet_project):
+    _mk_slug("alpha", stage="qa", status="ready", next_action="/plan",
+             spawn_directive="x" * 5000)
+    (line,) = [l for l in engine.render_zones()["prompts"].splitlines()
+               if l.startswith("  - directive:")]
+    assert line.endswith("…")
+    assert len(line) < engine.MAX_DIRECTIVE_DISPLAY + 20
+    # the STATE keeps the full text — only the display is clamped
+    assert len(engine.load_state("alpha")["spawn_directive"]) == 5000
+
+
+def test_render_write_skips_prompts_zone_on_legacy_hub(fleet_project):
+    """A hub wired before the PROMPTS zone existed keeps working unchanged."""
+    hub_file = paths.hub_path(engine.load_meta())
+    legacy = "\n".join(
+        ["# legacy three-zone hub", ""]
+        + [f"{b}\n{e}" for z, (b, e) in engine.MARKERS.items() if z != "prompts"]
+    ) + "\n"
+    hub_file.write_text(legacy, encoding="utf-8")
+    _mk_slug("alpha", stage="recon", status="ready", next_action="/qa")
+
+    assert fleet_main(["render", "--write"]) == exit_codes.EXIT_OK
+    text = hub_file.read_text(encoding="utf-8")
+    assert "| `alpha` |" in text            # legacy zones rendered
+    assert "FLEET:PROMPTS" not in text      # optional zone silently skipped
+
+
 def test_render_write_refuses_when_markers_missing(fleet_project, capsys):
     hub_file = paths.hub_path(engine.load_meta())
     hub_file.write_text("# a hub with no markers\n", encoding="utf-8")

@@ -214,6 +214,33 @@ def test_spawn_dry_run_prints_argv_and_launches_nothing(fleet_project, capsys):
     assert runs.load_runs(SLUG) == []
 
 
+def test_spawn_consumes_stored_directive_cli_overrides(fleet_project):
+    """The stored spawn_directive is the default child-prompt suffix —
+    resolved at SPAWN time, so no rendered/pasted command can carry a
+    stale copy. An explicit --prompt-suffix (even "") overrides it."""
+    engine.update(SLUG, stage="qa", status="ready", next_action="/plan",
+                  actor="op", spawn_directive="OPERATOR DIRECTIVES: plan tight.")
+
+    _, argv = spawn.spawn(SLUG, "plan", overrides={}, dry_run=True)
+    assert argv[2] == f"/splock:plan {SLUG}\n\nOPERATOR DIRECTIVES: plan tight."
+
+    _, argv = spawn.spawn(SLUG, "plan", overrides={},
+                          prompt_suffix="use THIS instead", dry_run=True)
+    assert argv[2].endswith("\n\nuse THIS instead")
+
+    _, argv = spawn.spawn(SLUG, "plan", overrides={}, prompt_suffix="",
+                          dry_run=True)
+    assert argv[2] == f"/splock:plan {SLUG}"  # "" = explicitly bare
+
+
+def test_board_json_surfaces_spawn_directive(fleet_project, capsys):
+    engine.update(SLUG, stage="qa", status="ready", next_action="/plan",
+                  actor="op", spawn_directive="ingest the qa recs")
+    assert fleet_main(["board", "--json"]) == exit_codes.EXIT_OK
+    b = json.loads(capsys.readouterr().out)
+    assert b["slugs"][SLUG]["spawn_directive"] == "ingest the qa recs"
+
+
 def test_spawn_records_ledger_row_and_payload(fleet_project, monkeypatch):
     monkeypatch.setattr(spawn.shutil, "which", lambda _: "/usr/bin/claude")
     launched: dict = {}

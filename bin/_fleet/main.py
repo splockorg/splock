@@ -2,7 +2,8 @@
 
 Subcommands:
   update <slug> [--stage S] [--status S] [--next N] [--blockers B]
-                [--piece P] [--wave W] [--actor A] [--note N] [--render]
+                [--piece P] [--wave W] [--actor A] [--note N]
+                [--spawn-directive TEXT] [--render]
   render  [--write]
   state   <slug>
   init    [--hub <existing .md>]
@@ -95,6 +96,10 @@ def build_parser() -> argparse.ArgumentParser:
     u.add_argument("--wave", type=int)
     u.add_argument("--actor")
     u.add_argument("--note")
+    u.add_argument("--spawn-directive", dest="spawn_directive",
+                   help="per-slug operator context `fleet spawn` appends to "
+                        "the child prompt (one-shot: cleared when the stage "
+                        'that consumed it finishes; "" clears by hand)')
     u.add_argument("--render", action="store_true",
                    help="also regenerate the hub zones")
 
@@ -126,7 +131,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="one-time: wire the FLEET:* zones + protocol into the registered hub",
         allow_abbrev=False,
     )
-    for zone in ("now", "board", "recent"):
+    for zone in engine.MARKERS:
         m.add_argument(f"--{zone}-start", dest=f"{zone}_start", default=None,
                        help=f"start anchor for the {zone} zone (kept verbatim)")
         m.add_argument(f"--{zone}-end", dest=f"{zone}_end", default=None,
@@ -211,6 +216,7 @@ def _cmd_update(args: argparse.Namespace) -> int:
             wave=args.wave,
             actor=args.actor,
             note=args.note,
+            spawn_directive=args.spawn_directive,
         )
     except ValueError as exc:
         _emit_stderr_json({"error": "usage", "detail": str(exc)})
@@ -307,7 +313,7 @@ def _cmd_migrate(args: argparse.Namespace) -> int:
     if not _require_initialized("migrate"):
         return exit_codes.EXIT_FLEET_NOT_INITIALIZED
     anchors: dict[str, tuple[str, str]] = {}
-    for zone in ("now", "board", "recent"):
+    for zone in engine.MARKERS:
         start = getattr(args, f"{zone}_start")
         end = getattr(args, f"{zone}_end")
         if (start is None) != (end is None):

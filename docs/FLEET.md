@@ -93,6 +93,7 @@ Manual updates remain for out-of-band changes:
 
 ```bash
 bin/fleet update <slug> --status parked --note "waiting on upstream" --render
+bin/fleet update <slug> --spawn-directive "ingest the qa recs in Call 1"
 bin/fleet state <slug>
 bin/fleet render --write
 ```
@@ -100,6 +101,50 @@ bin/fleet render --write
 **status** ∈ `ready` (next stage runnable) · `wip` (a stage in flight) ·
 `done` (pipeline gates cleared) · `blocked` · `parked` · `closed`
 (archived).
+
+## The prompt bay (generated next actions)
+
+First-field-deployment finding (qum, 2026-07-18): the one hub section
+fleet didn't generate — a hand-authored "Prompt Bay" of per-slug
+copy-paste kickoff blocks — rotted within a day (blocks survived three
+stage progressions unedited; a closed slug's block outlived its own
+archival). The root cause: the bay was *derived state expressed as
+hand-authored prose*, and fleet owned every input except one — the
+per-slug directive text that makes a spawn self-contained. Anything
+derived that isn't generated will rot, so both halves are now fleet's:
+
+- **The missing input is persisted.** `bin/fleet update <slug>
+  --spawn-directive "<operator context>"` stores that text in the
+  slug's `_fleet.json` (same contention-free write path as status). It
+  round-trips through `bin/fleet state` and `board --json`; `""`
+  clears it by hand.
+- **`spawn` consumes it.** With no `--prompt-suffix`, `bin/fleet spawn`
+  appends the stored directive to the child prompt; an explicit
+  `--prompt-suffix` (even `""`) overrides it for that spawn only.
+  Directives are **one-shot**: they target the stage about to run, so
+  any stage completion clears the slug's directive — the bay never
+  advertises consumed context to the next stage. (A `blocked` halt
+  keeps it, for the retry/resume.)
+- **The `FLEET:PROMPTS` zone renders only non-derived inputs.** Each
+  ready slug gets a runnable one-liner — `bin/fleet spawn <slug>
+  --stage <next>` — with the stored directive shown as an annotation,
+  never embedded in the command: model/effort/budget resolve from the
+  stage profile and the directive from state *at spawn time*, so a
+  pasted line cannot carry stale config. Blocked/parked slugs form a
+  held group with their blockers; wip/done/closed slugs drop
+  automatically — closeout can't leave husks.
+
+Hubs wired before this zone existed keep working unchanged (`render
+--write` skips the absent markers; the original three zones stay
+mandatory). To upgrade, re-run `bin/fleet migrate`: it wires ONLY
+missing zones — between `--prompts-start/--prompts-end` anchors, or
+appended as a compact marker block. Fresh `init` scaffolds include the
+zone.
+
+Doctrine (ADOPTION.md): retire hand-authored "what to run next"
+sections on fleet adoption. Narrative around the zones stays yours —
+wave gates, operator rulings, outside-repo hand-offs; the runnable
+next actions are generated.
 
 ## Safety properties
 
@@ -149,7 +194,9 @@ API-key-only by policy. Subscription OAuth works headless;
 `ANTHROPIC_API_KEY` is never read or required by the spawner. The child
 runs with cwd = the project root, so it reads the project's CLAUDE.md
 and inherits the fleet protocol; its own stage engines record
-`wip`/`ready`/`blocked` — the spawner adds no prompt scaffolding.
+`wip`/`ready`/`blocked` — the spawner adds no scaffolding of its own,
+only the slug's stored spawn directive (see §The prompt bay), which an
+explicit `--prompt-suffix` overrides.
 
 **Bookkeeping** stays per-slug: every spawn/resume appends to
 `docs/plans/<slug>/_fleet_runs.jsonl` (same append discipline as the

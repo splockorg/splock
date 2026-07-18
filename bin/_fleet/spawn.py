@@ -173,6 +173,12 @@ def spawn(
     if resume_session:
         prompt = resume_prompt
     else:
+        if prompt_suffix is None:
+            # The slug's stored spawn_directive is the default suffix — the
+            # persisted per-slug input whose hand-authored form ("prompt
+            # bays") rotted in the field. An explicit --prompt-suffix (even
+            # "") overrides it for this spawn only.
+            prompt_suffix = (engine.load_state(slug) or {}).get("spawn_directive") or None
         prompt = build_prompt(profile["command_template"], stage, slug, prompt_suffix)
     argv = build_child_argv(prompt, profile, resume_session=resume_session)
 

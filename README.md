@@ -87,7 +87,12 @@ own model/effort/permission profile; `bin/fleet board` is the single
 screen showing lifecycle, live children, blockers with copy-paste
 resume handles, and cumulative cost; `bin/fleet resume <slug>`
 re-enters a blocked child's exact session with its context intact.
-See `docs/FLEET.md`.
+Next actions are generated too: the hub's prompt-bay zone renders a
+runnable `bin/fleet spawn` one-liner per ready slug, and the per-slug
+context that makes a spawn self-contained is stored once
+(`bin/fleet update <slug> --spawn-directive "…"`) and applied by
+`spawn` itself — hand-authored prompt bays are retired on adoption
+(derived state that isn't generated rots). See `docs/FLEET.md`.
 
 ---
 

@@ -87,7 +87,12 @@ def stage_started(slug: str, stage: str, *, actor: str | None = None,
 def stage_finished(slug: str, stage: str, *, status: str = "ready",
                    next_action: str | None = None, actor: str | None = None,
                    note: str | None = None) -> None:
-    """Clean stage completion: `ready --next <next stage>` (or `done`)."""
+    """Clean stage completion: `ready --next <next stage>` (or `done`).
+
+    Also clears the slug's stored `spawn_directive`: a directive targets
+    the stage that just ran, so any stage completion consumes it — the
+    prompt bay never advertises stale context for the NEXT stage.
+    """
     try:
         if not _active(slug):
             return
@@ -100,6 +105,7 @@ def stage_finished(slug: str, stage: str, *, status: str = "ready",
             next_action=next_action or "—",
             actor=actor or f"{stage}-engine",
             note=note or f"{stage} completed",
+            spawn_directive="",
         )
         _render_best_effort()
     except Exception as exc:  # noqa: BLE001

@@ -52,6 +52,7 @@ def build_board() -> dict:
             "status": st.get("status"),
             "next": st.get("next"),
             "blockers": st.get("blockers") or "",
+            "spawn_directive": st.get("spawn_directive") or "",
             "session_id": session,
             "cost_usd": round(cost, 4),
             "live": len(live),
