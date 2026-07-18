@@ -16,8 +16,14 @@ Sections:
   run errored/was permission-denied, or whose runner died — each with a
   copy-paste resume command (`bin/fleet resume <slug> --directive …`,
   raw `claude -p --resume <sid> …` equivalent shown too);
-- **totals** — cumulative `total_cost_usd` across every recorded run
-  (all children draw one subscription pool).
+- **totals** — cumulative `total_cost_usd` across every recorded run.
+
+Cost framing (first-field-deployment finding): fleet children run on the
+operator's subscription OAuth, where the CLI's `total_cost_usd` is a
+notional API-rate equivalent — a subscription-pool-draw meter, NOT
+billing. The text board labels it "est. pool draw" so a subscription
+operator is never alarmed by dollar framing; the JSON keys keep their
+CLI-native names (`cost_usd`) for tooling compatibility.
 """
 
 from __future__ import annotations
@@ -112,18 +118,22 @@ def render_text(board: dict) -> str:
     lines.append(
         f"fleet board — {len(board['slugs'])} slugs · "
         f"{totals['live']}/{totals['max_concurrent']} children live · "
-        f"${totals['cost_usd']:.4f} spent"
+        f"est. pool draw ${totals['cost_usd']:.4f}"
     )
 
     if board["slugs"]:
-        lines += ["", "  slug · stage/status → next · session · cost"]
+        lines += ["", "  slug · stage/status → next · session · est. draw"]
         for s in board["slugs"].values():
-            glyph = engine.GLYPH.get(s["status"], "?")
+            if s["stage"] is None and s["status"] is None:
+                lifecycle = "(no state yet)"  # fresh slug: no _fleet.json write
+            else:
+                glyph = engine.GLYPH.get(s["status"], "?")
+                lifecycle = f"{s['stage'] or '—'}/{glyph} {s['status'] or '?'}"
             sid = (s["session_id"] or "—")[:8]
             live = f" · {s['live']} live" if s["live"] else ""
             died = f" · {s['died']} died" if s["died"] else ""
             lines.append(
-                f"  {s['slug']} · {s['stage'] or '—'}/{glyph} {s['status'] or '?'}"
+                f"  {s['slug']} · {lifecycle}"
                 f" → {s['next'] or '—'} · {sid} · ${s['cost_usd']:.4f}{live}{died}"
             )
 

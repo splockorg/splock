@@ -355,6 +355,23 @@ def test_board_folds_states_runs_cost_and_attention(fleet_project, capsys):
     assert json.loads(capsys.readouterr().out)["totals"]["cost_usd"] == 0.30
 
 
+def test_board_text_fresh_slug_row_and_pool_draw_label(fleet_project, capsys):
+    """Field-deployment polish: a spawned-but-never-updated slug (runs
+    rows, no `_fleet.json`) must not render the cryptic `—/? ?`, and the
+    dollar meter reads as pool draw, not billing."""
+    runs.append_run(SLUG, _end_row("r1", session="sid-1", cost=0.7165))
+    assert fleet_main(["board"]) == exit_codes.EXIT_OK
+    text = capsys.readouterr().out
+    assert f"{SLUG} · (no state yet) → —" in text
+    assert "—/? ?" not in text
+    assert "est. pool draw $0.7165" in text
+    assert "spent" not in text
+    # JSON keys stay CLI-native for tooling
+    assert fleet_main(["board", "--json"]) == exit_codes.EXIT_OK
+    b = json.loads(capsys.readouterr().out)
+    assert b["totals"]["cost_usd"] == 0.7165
+
+
 def test_board_never_crashes_on_empty_project(fleet_project, capsys):
     assert fleet_main(["board"]) == exit_codes.EXIT_OK
     assert "nothing needs attention." in capsys.readouterr().out

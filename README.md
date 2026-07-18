@@ -85,7 +85,7 @@ fresh headless Claude Code session per task (CLI subprocess on the
 operator's subscription — never the API-key-only SDK), each with its
 own model/effort/permission profile; `bin/fleet board` is the single
 screen showing lifecycle, live children, blockers with copy-paste
-resume handles, and cumulative cost; `bin/fleet resume <slug>`
+resume handles, and cumulative est. pool draw; `bin/fleet resume <slug>`
 re-enters a blocked child's exact session with its context intact.
 Next actions are generated too: the hub's prompt-bay zone renders a
 runnable `bin/fleet spawn` one-liner per ready slug, and the per-slug

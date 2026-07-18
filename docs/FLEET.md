@@ -207,8 +207,11 @@ result_snippet}`. Full child JSON + runner log land at
 `docs/plans/_fleet/runs/<run_id>.{json,log}` (unique names — no shared
 write target). The board is a pure fold: lifecycle per slug, live
 children (runner pid), died runners, blocked slugs with copy-paste
-resume commands, and cumulative cost — torn rows and dead children
-degrade to rendered warnings, never a crash.
+resume commands, and the cumulative pool draw — torn rows and dead
+children degrade to rendered warnings, never a crash. On subscription
+OAuth the CLI's `total_cost_usd` is a notional API-rate equivalent (a
+pool-draw meter, not billing), so the text board labels it "est. pool
+draw"; `board --json` keeps the CLI-native `cost_usd` keys.
 
 **Per-stage profiles** live in `_fleet_meta.json` (absent keys fall
 through to the claude CLI's own defaults; CLI flags > stage profile >
