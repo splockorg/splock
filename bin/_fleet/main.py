@@ -10,11 +10,23 @@ Subcommands:
   migrate [--<zone>-start S --<zone>-end E]... [--dry-run]
   stage   (start|finish) <slug> --stage S [--status S] [--next N]
           [--actor A] [--note N]
+  spawn   <slug> --stage S [--model M] [--effort E]
+          [--permission-mode P] [--allowed-tools T...]
+          [--max-budget-usd B] [--prompt-suffix TEXT] [--dry-run]
+  board   [--json]
+  resume  <slug> [--session SID] [--directive TEXT] [--model M]
+          [--effort E] [--permission-mode P] [--allowed-tools T...]
+          [--max-budget-usd B] [--dry-run]
 
 `stage` is the auto-integration verb the stage commands run: it is a
 SILENT NO-OP (exit 0) when the project has not opted in, so it is safe
 to call unconditionally. The other mutating subcommands refuse with
-exit 39 until `bin/fleet init` has been run.
+exit 45 until `bin/fleet init` has been run.
+
+`spawn`/`board`/`resume` are the headless C&C surface: one parent
+screen forks fresh `claude -p` children (CLI subprocess — subscription
+transport, never the SDK), absorbs only their final JSON, and re-enters
+any child by session id. See docs/FLEET.md §Headless C&C.
 
 Invoked via the POSIX shell wrapper at `bin/fleet`, which delegates to
 `python -m bin._fleet.main`.
@@ -25,10 +37,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
+import subprocess
 import sys
 
-from bin._fleet import auto, engine, exit_codes, hub, paths
+from bin import _env_paths
+from bin._fleet import auto, board as board_mod, engine, exit_codes, hub, paths
+from bin._fleet import runs as runs_mod
 from bin._fleet import seed as seed_mod
+from bin._fleet import spawn as spawn_mod
 
 
 def _emit_stderr_json(payload: dict) -> None:
@@ -130,6 +147,52 @@ def build_parser() -> argparse.ArgumentParser:
                     help="finish only; default = the canonical next stage")
     st.add_argument("--actor", default=None)
     st.add_argument("--note", default=None)
+
+    def _add_child_config_flags(sp: argparse.ArgumentParser) -> None:
+        sp.add_argument("--model", default=None,
+                        help="child model id (else stage profile / CLI default)")
+        sp.add_argument("--effort", default=None,
+                        choices=["low", "medium", "high", "xhigh", "max"])
+        sp.add_argument("--permission-mode", dest="permission_mode", default=None,
+                        help="child permission mode (headless default DENIES "
+                             "unapproved actions and the child reports them)")
+        sp.add_argument("--allowed-tools", dest="allowed_tools", nargs="+",
+                        default=None,
+                        help='tool patterns, e.g. Bash "Bash(git diff *)" Edit')
+        sp.add_argument("--max-budget-usd", dest="max_budget_usd", default=None,
+                        help="per-child spend ceiling (claude --max-budget-usd)")
+        sp.add_argument("--dry-run", action="store_true",
+                        help="print the child argv; launch nothing")
+
+    sp = sub.add_parser(
+        "spawn",
+        help="fork a fresh headless child for one stage (C&C; subscription "
+             "CLI transport)",
+        allow_abbrev=False,
+    )
+    sp.add_argument("slug")
+    sp.add_argument("--stage", required=True, dest="stage_name")
+    sp.add_argument("--prompt-suffix", dest="prompt_suffix", default=None,
+                    help="extra prompt text appended after the stage command")
+    _add_child_config_flags(sp)
+
+    b = sub.add_parser("board", help="the C&C view: states + live children + "
+                                     "resume handles + cost",
+                       allow_abbrev=False)
+    b.add_argument("--json", action="store_true", dest="json_output")
+
+    rs = sub.add_parser(
+        "resume",
+        help="re-enter a slug's newest headless session with its context intact",
+        allow_abbrev=False,
+    )
+    rs.add_argument("slug")
+    rs.add_argument("--session", default=None,
+                    help="explicit session id (default: newest in the runs ledger)")
+    rs.add_argument("--directive", default=None,
+                    help="operator directive — wrapped via bin/wrap "
+                         "(data-not-instructions envelope) before injection")
+    _add_child_config_flags(rs)
 
     return p
 
@@ -306,6 +369,107 @@ def _cmd_stage(args: argparse.Namespace) -> int:
     return exit_codes.EXIT_OK
 
 
+def _child_overrides(args: argparse.Namespace) -> dict:
+    return {
+        "model": args.model,
+        "effort": args.effort,
+        "permission_mode": args.permission_mode,
+        "allowed_tools": args.allowed_tools,
+        "max_budget_usd": args.max_budget_usd,
+    }
+
+
+def _cmd_spawn(args: argparse.Namespace) -> int:
+    if not _require_initialized("spawn"):
+        return exit_codes.EXIT_FLEET_NOT_INITIALIZED
+    try:
+        run_id, argv = spawn_mod.spawn(
+            args.slug,
+            args.stage_name,
+            overrides=_child_overrides(args),
+            prompt_suffix=args.prompt_suffix,
+            dry_run=args.dry_run,
+        )
+    except spawn_mod.SpawnRefused as exc:
+        _emit_stderr_json({"error": "spawn_refused", "detail": str(exc)})
+        return exit_codes.EXIT_SPAWN_REFUSED
+    if args.dry_run:
+        print(f"dry-run: {shlex.join(argv)}")
+        return exit_codes.EXIT_OK
+    print(
+        f"fleet: spawned {args.slug} [{args.stage_name}] run {run_id} — "
+        f"detached; result lands in {runs_mod.runs_path(args.slug).name}; "
+        f"watch with `bin/fleet board`"
+    )
+    return exit_codes.EXIT_OK
+
+
+def _cmd_board(args: argparse.Namespace) -> int:
+    b = board_mod.build_board()
+    print(board_mod.render_json(b) if args.json_output else board_mod.render_text(b))
+    return exit_codes.EXIT_OK
+
+
+def _wrap_directive(directive: str) -> str:
+    """Route operator prose through the canonical data-not-instructions
+    envelope (`bin/wrap --kind operator-directive`)."""
+    wrap_bin = _env_paths.plugin_root() / "bin" / "wrap"
+    proc = subprocess.run(
+        [str(wrap_bin), "--kind", "operator-directive"],
+        input=directive.encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if proc.returncode != 0:
+        raise spawn_mod.SpawnRefused(
+            "bin/wrap refused the directive "
+            f"(exit {proc.returncode}): {proc.stderr.decode('utf-8', 'replace').strip()}"
+        )
+    return proc.stdout.decode("utf-8")
+
+
+def _cmd_resume(args: argparse.Namespace) -> int:
+    if not _require_initialized("resume"):
+        return exit_codes.EXIT_FLEET_NOT_INITIALIZED
+    session = args.session or runs_mod.latest_session_id(args.slug)
+    if not session:
+        _emit_stderr_json({
+            "error": "no_session",
+            "detail": f"no session recorded for {args.slug} in "
+                      f"{runs_mod.runs_path(args.slug)} — spawn one first",
+        })
+        return exit_codes.EXIT_NO_SESSION
+
+    state = engine.load_state(args.slug) or {}
+    stage = state.get("stage") or "resume"
+    try:
+        if args.directive:
+            prompt = _wrap_directive(args.directive)
+        else:
+            prompt = ("Continue the blocked work for this task. Re-check the "
+                      "blocker you reported, resolve it if now possible, and "
+                      "finish the stage per the fleet protocol.")
+        run_id, argv = spawn_mod.spawn(
+            args.slug,
+            stage,
+            overrides=_child_overrides(args),
+            resume_session=session,
+            resume_prompt=prompt,
+            dry_run=args.dry_run,
+        )
+    except spawn_mod.SpawnRefused as exc:
+        _emit_stderr_json({"error": "spawn_refused", "detail": str(exc)})
+        return exit_codes.EXIT_SPAWN_REFUSED
+    if args.dry_run:
+        print(f"dry-run: {shlex.join(argv)}")
+        return exit_codes.EXIT_OK
+    print(
+        f"fleet: resumed {args.slug} (session {session[:8]}…) run {run_id} — "
+        f"detached; watch with `bin/fleet board`"
+    )
+    return exit_codes.EXIT_OK
+
+
 _DISPATCH = {
     "update": _cmd_update,
     "render": _cmd_render,
@@ -314,6 +478,9 @@ _DISPATCH = {
     "seed": _cmd_seed,
     "migrate": _cmd_migrate,
     "stage": _cmd_stage,
+    "spawn": _cmd_spawn,
+    "board": _cmd_board,
+    "resume": _cmd_resume,
 }
 
 

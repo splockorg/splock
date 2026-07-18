@@ -122,6 +122,88 @@ separate processes: 8 writers × 40 same-slug appends lose zero events,
 and a reader polling `_fleet.json` during update churn never observes a
 torn state file.
 
+## Headless C&C (`spawn` / `board` / `resume`)
+
+One parent session — the operator's single screen — forks **fresh,
+headless Claude Code sessions**, one per task, each with its own
+model/effort/permission config, running in the background on the
+operator's **subscription**. The parent absorbs only each child's final
+JSON result (a few KB), never its context; blockers centralize onto one
+board; any child is re-enterable by session id with its full context
+intact. Fresh-context-per-task AND nothing-ever-lost, simultaneously.
+
+```bash
+bin/fleet spawn <slug> --stage recon                  # profile-driven child
+bin/fleet spawn <slug> --stage code --model claude-fable-5 --effort xhigh \
+    --permission-mode acceptEdits --allowed-tools Bash Edit Write
+bin/fleet board                                       # states + live children +
+                                                      #   resume handles + cost
+bin/fleet resume <slug> --directive "the DB was down; retry the migration"
+```
+
+**Transport (billing-model constraint, not style):** children are
+spawned as `claude -p "/splock:<stage> <slug>" --output-format json`
+CLI subprocesses — never via the Claude Agent SDK, which is
+API-key-only by policy. Subscription OAuth works headless;
+`CLAUDE_CODE_OAUTH_TOKEN` is honored for detached contexts (cron/CI);
+`ANTHROPIC_API_KEY` is never read or required by the spawner. The child
+runs with cwd = the project root, so it reads the project's CLAUDE.md
+and inherits the fleet protocol; its own stage engines record
+`wip`/`ready`/`blocked` — the spawner adds no prompt scaffolding.
+
+**Bookkeeping** stays per-slug: every spawn/resume appends to
+`docs/plans/<slug>/_fleet_runs.jsonl` (same append discipline as the
+event log) — a `spawned`/`resumed` row from the parent the moment the
+command returns, and a `completed`/`failed` row from the detached
+runner carrying `{session_id, total_cost_usd, is_error, denials,
+result_snippet}`. Full child JSON + runner log land at
+`docs/plans/_fleet/runs/<run_id>.{json,log}` (unique names — no shared
+write target). The board is a pure fold: lifecycle per slug, live
+children (runner pid), died runners, blocked slugs with copy-paste
+resume commands, and cumulative cost — torn rows and dead children
+degrade to rendered warnings, never a crash.
+
+**Per-stage profiles** live in `_fleet_meta.json` (absent keys fall
+through to the claude CLI's own defaults; CLI flags > stage profile >
+`_defaults`):
+
+```json
+"profiles": {
+  "_defaults": {"permission_mode": "default"},
+  "code":  {"model": "claude-fable-5", "effort": "xhigh",
+             "permission_mode": "acceptEdits",
+             "allowed_tools": ["Bash", "Edit", "Write"]},
+  "recon": {"model": "claude-opus-4-8", "effort": "high"}
+},
+"max_concurrent": 4,
+"command_template": "/splock:{stage} {slug}"
+```
+
+`max_concurrent` exists because all children draw ONE subscription pool
+(5-hour/weekly limits); `--max-budget-usd` adds a per-child spend
+ceiling. A qum-era meta without these keys works unchanged (zero
+migration): defaults apply.
+
+**Verified platform facts** (live spike, 2026-07-18, CLI 2.1.214 —
+re-verify before relying on version-sensitive behavior):
+
+- `--output-format json` returns `{result, session_id, total_cost_usd,
+  is_error, permission_denials, modelUsage, num_turns, usage, …}`.
+- Headless `claude -p --resume <session_id> "<directive>"` re-enters
+  with full context; the session id is unchanged (`--fork-session` to
+  mint a new one).
+- Under headless `default` permission mode a denied tool call is
+  recorded in `permission_denials` and the child completes gracefully
+  (`is_error: false`) — the board treats a non-empty denial list as a
+  needs-attention signal alongside fleet-status `blocked`.
+- Per-child `--model`, `--effort low|medium|high|xhigh|max`,
+  `--permission-mode`, `--allowedTools`, `--max-budget-usd` all exist
+  as first-class flags.
+- Subscription OAuth works with `ANTHROPIC_API_KEY` unset (verified by
+  spawning with the var explicitly removed).
+- The `ultracode` keyword does **not** activate in `-p` children (no
+  system reminder observed) — do not rely on it in child prompts.
+
 ## Files
 
 - `bin/fleet` — POSIX wrapper → `python -m bin._fleet.main`.
@@ -130,5 +212,10 @@ torn state file.
 - `bin/_fleet/seed.py` — one-time state seeding from operator JSON.
 - `bin/_fleet/auto.py` — the engine-side stage hooks + the canonical
   stage → next-command map.
+- `bin/_fleet/runs.py` — the per-slug C&C runs ledger.
+- `bin/_fleet/spawn.py` + `spawn_runner.py` — headless child spawner
+  (CLI-subprocess transport) + the detached result-capturing runner.
+- `bin/_fleet/board.py` — the C&C fold (`fleet board [--json]`).
 - `bin/_fleet/exit_codes.py` — closed enum (45 =
-  `fleet_not_initialized`, 46 = `hub_anchor_missing`).
+  `fleet_not_initialized`, 46 = `hub_anchor_missing`, 47 =
+  `spawn_refused`, 48 = `no_session`).

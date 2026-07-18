@@ -171,6 +171,19 @@ def init(hub: str | None = None) -> tuple[bool, Path]:
         "closed": [],
         "roster": {},
         "hub": hub_rel,
+        # ── headless C&C (bin/fleet spawn/board/resume) ──
+        # Per-stage child profiles: model / effort / permission_mode /
+        # allowed_tools / max_budget_usd, with "_defaults" as the base
+        # layer. CLI flags override the stage profile which overrides
+        # "_defaults". All keys optional — an absent key falls through
+        # to the claude CLI's own defaults.
+        "profiles": {"_defaults": {}},
+        # All children draw ONE subscription pool (5-h/weekly limits).
+        "max_concurrent": 4,
+        # The headless child's prompt; {stage}/{slug} are substituted.
+        # "/splock:<stage>" is the installed-plugin spelling — drop the
+        # "splock:" prefix for sideloaded/in-tree checkouts.
+        "command_template": "/splock:{stage} {slug}",
     }
     engine.save_meta(meta)
 

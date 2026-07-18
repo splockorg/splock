@@ -14,6 +14,9 @@
 #   seed --from <seed.json> [--force] [--events]
 #   migrate [--now-start S --now-end E] [...] [--dry-run]
 #   stage (start|finish) <slug> --stage S [opts]     # auto-integration verb
+#   spawn <slug> --stage S [--model M] [--effort E] [opts]   # headless C&C
+#   board [--json]                                            # C&C view
+#   resume <slug> [--session SID] [--directive TEXT] [opts]   # re-enter child
 #
 # Exit codes: closed enum per bin/_fleet/exit_codes.py.
 set -e
