@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# bin/eli5 — plainspeak briefing generator CLI (the eli5 lens).
+#
+# Thin POSIX wrapper around `python -m bin._eli5.main`. eli5 is
+# TRANSLATION of existing material into plainspeak — the third leg of
+# qa (finds problems) / qna (finds answers) / eli5 (finds nothing new).
+# See docs/feedback_eli5_terminology.md.
+#
+# Usage:
+#   bin/eli5 --subject-file <path> [--focus "<text>"]
+#            [--mode auto|decision|informative] [--out <path>] [--prompt-file]
+#   bin/eli5 --print-format auto|decision|informative
+#   bin/eli5 --next-prompt-path <dir>
+#
+# Exit codes per bin/_eli5/exit_codes.py:
+#   0 = success · 1 = usage · 7 = atomic write failed
+#   17 = SDK call failed (same as bin/qa) · 49 = subject unreadable/empty
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Preserve the invoking directory for bin/_env_paths.project_root():
+# the cd below moves to the plugin/checkout root, which in installed-
+# plugin mode is NOT the adopter repo the CLI must operate on.
+export SPLOCK_CALLER_PWD="${SPLOCK_CALLER_PWD:-$PWD}"
+cd "$REPO_ROOT"
+
+# Activate venv if present and not already active (idempotent).
+VENV="${SPLOCK_VENV:-.venv}/bin/activate"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
+  # shellcheck disable=SC1090
+  source "$VENV"
+fi
+
+# The eli5 pass runs on the Claude Code subscription transport and
+# does NOT read ANTHROPIC_API_KEY. A missing key is expected, not an
+# error — do not refuse to run on its account. See commands/eli5.md.
+echo "splock: eli5 uses the Claude Code subscription transport (no ANTHROPIC_API_KEY required)" >&2
+
+exec "$(command -v python || command -v python3)" -m bin._eli5.main "$@"

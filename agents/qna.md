@@ -12,7 +12,8 @@ read-only shell commands, and (when needed) fetching external context;
 returns a final message structured as a Q&A entry.
 
 Per v2.7 §1.C + v2.7 §1.D (Q&A subagent row, renamed `qna` per
-`feedback_qa_vs_qna_terminology.md`).
+`docs/feedback_eli5_terminology.md`, the tracked successor of the
+untracked qa-vs-qna note).
 
 `qna` is **question-and-answer**, NOT quality-assurance. For
 adversarial review of a recon artifact, see `.claude/agents/qa.md`.
@@ -125,9 +126,9 @@ naming pattern (each subagent's description begins with its name).
 - v2.7 §1.C — `/qna` (formerly `/qa` Q&A) spec
 - v2.7 §1.D — full prompt-content spec for all non-planner subagents
 - v2.7 §1.B — Tier-1 patch emission criterion
-- `feedback_qa_vs_qna_terminology.md` — `qa` vs `qna` naming rule
+- `docs/feedback_eli5_terminology.md` — `qa` vs `qna` (vs `eli5`) naming rule
 - `.claude/agents/qa.md` — distinct adversarial-review subagent
-- `bin/_planner/external_input_sanitize.py` — `WrapKind` closed enum (7 kinds)
+- `bin/_planner/external_input_sanitize.py` — `WrapKind` closed enum (8 kinds)
 - `bin/wrap` — main-agent helper for emitting wrapped `<operator-directive>` blocks
 - F gotcha #33583 — prompt-injection vector documentation
 

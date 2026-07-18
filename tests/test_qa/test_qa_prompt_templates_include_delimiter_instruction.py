@@ -121,10 +121,16 @@ def test_planner_wrapkind_enum_unchanged_no_subject_member() -> None:
 
     A regression here would mean someone took the easy path of adding a
     `subject-under-review` (or `plan-findings`, etc.) WrapKind member to
-    get a neutral label — defeating the 'leave the closed enum' contract."""
+    get a neutral label — defeating the 'leave the closed enum' contract.
+
+    Count bumped 7 → 8 (2026-07-18): `eli5-subject` joined the enum as a
+    provenance-named EXTERNAL-input kind (the excerpted material /eli5
+    translates) — exactly what the enum exists for, per its documented
+    extension process. The guarded anti-pattern (minting an INTERNAL
+    structural label as a member) is unchanged and still pinned below."""
     members = set(WrapKind.__args__)  # type: ignore[attr-defined]
-    assert len(members) == 7, (
-        f"WrapKind must stay at 7 members; got {len(members)}: "
+    assert len(members) == 8, (
+        f"WrapKind must stay at 8 members; got {len(members)}: "
         f"{sorted(members)}"
     )
     assert "subject-under-review" not in members, (

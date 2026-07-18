@@ -35,6 +35,7 @@ WRAPPER_MODULE_TARGETS: dict[str, str] = {
     "chain-resume": "bin._chain_resume.main",
     "cli-lint": "bin._cli_lint.main",
     "develop-plan-bypass-status": "bin._update_orchestrator.bypass_status",
+    "eli5": "bin._eli5.main",
     "eval-baseline": "bin._eval_baseline.main",
     "eval-gate": "bin._eval_gate.main",
     "eval-trend": "bin._eval_trend.main",

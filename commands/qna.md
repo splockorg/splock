@@ -33,8 +33,8 @@ evidence.
 
 `qna` is **question-and-answer**, NOT quality-assurance. For adversarial
 review of a recon artifact, use `/qa <slug>` (which invokes the
-`qa` subagent / `bin/qa` CLI). See memory:
-`feedback_qa_vs_qna_terminology.md`.
+`qa` subagent / `bin/qa` CLI). See
+`docs/feedback_eli5_terminology.md` (qa vs qna vs eli5).
 
 `/qna` is an **exploratory peer to `/recon` and `/research`** — not
 phase-gated. It does not require a pre-existing recon or plan; use it
@@ -245,7 +245,7 @@ update.
   delimiter discipline (six WrapKind entries including
   `operator-directive`)
 - `bin/wrap` — wrap helper for operator-directive content
-- `feedback_qa_vs_qna_terminology.md` — naming rationale
+- `docs/feedback_eli5_terminology.md` — naming rationale (qa vs qna vs eli5)
 - v2.7 §1.C — /qa spec (legacy text using `qa` for the Q&A meaning;
   current substrate uses `qna` for that meaning)
 - v2.7 §1.B — Tier-1 patch emission criterion
