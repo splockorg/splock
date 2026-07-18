@@ -87,6 +87,7 @@ from bin._update_orchestrator.closed_state import is_closed as _orchestrator_is_
 # `invoke_planner` is used programmatically.
 
 from bin._env_paths import plans_dir as _env_paths_plans_dir
+from bin._fleet import auto as fleet_auto
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PLANS_DIR = _env_paths_plans_dir()
@@ -926,6 +927,13 @@ def main(argv: list[str] | None = None) -> int:
         _emit_stderr_json({"error": "usage", "detail": str(exc)})
         return exit_codes.EXIT_USAGE
 
+    # fleet auto-integration (docs/FLEET.md): stage start = wip. A silent
+    # no-op unless the adopter project ran `bin/fleet init`; never raises.
+    if not getattr(args, "stdout", False):
+        fleet_auto.stage_started(
+            args.slug, args.step, actor=f"{args.step}-engine"
+        )
+
     # plan_surgical_amend §SC6 (T6e) — the amend dispatch starts HERE, at the
     # Call-2 step selection. `--amend` is a FLAG on the `plan` subcommand, so
     # `args.step == "plan"` even in amend mode (T6d flagged this). The two-call
@@ -1586,6 +1594,15 @@ def main(argv: list[str] | None = None) -> int:
             ops=_amend_ops,
             result="applied",
         )
+
+    # fleet auto-integration: stage completion = ready, next stage queued
+    # (`plan` → /implplan, `implplan` → /code per fleet_auto.STAGE_NEXT).
+    fleet_auto.stage_finished(
+        args.slug,
+        args.step,
+        actor=f"{args.step}-engine",
+        note="plan amended" if amend else f"{args.step} written",
+    )
 
     return exit_codes.EXIT_OK
 

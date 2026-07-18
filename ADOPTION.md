@@ -164,6 +164,10 @@ A minimal end-to-end flow on a fresh slug:
 `/code` runs each task's coder under the completion gate and will not advance a
 task until the pinned verifier confirms a green test run.
 
+Running several slugs at once? Opt into the fleet status hub
+(`bin/fleet init`) and every stage run above starts tracking itself on a
+generated, contention-free status board — see `docs/FLEET.md`.
+
 ---
 
 ## 6. Verifying your install (adoption smoke checks)

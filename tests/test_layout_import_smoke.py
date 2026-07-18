@@ -38,6 +38,7 @@ WRAPPER_MODULE_TARGETS: dict[str, str] = {
     "eval-baseline": "bin._eval_baseline.main",
     "eval-gate": "bin._eval_gate.main",
     "eval-trend": "bin._eval_trend.main",
+    "fleet": "bin._fleet.main",
     "git-merge-jsonl": "bin._git_merge_jsonl.main",
     "hook-lint": "bin._hooks.hook_lint",
     "hook-log": "bin._hooks.main",

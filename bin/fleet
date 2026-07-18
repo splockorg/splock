@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# bin/fleet — concurrency-safe multi-slug lifecycle tracker (docs/FLEET.md).
+#
+# POSIX shell wrapper that activates the project venv and dispatches to
+# `python -m bin._fleet.main`. All subcommands + flags are owned by the
+# Python entry point; this wrapper exists only to centralize venv
+# activation + repo-root resolution.
+#
+# Subcommands:
+#   update <slug> [--stage S] [--status S] [--next N] [--actor A] [--note N] [--render]
+#   render [--write]
+#   state <slug>
+#   init [--hub <existing .md>]
+#   seed --from <seed.json> [--force] [--events]
+#   migrate [--now-start S --now-end E] [...] [--dry-run]
+#   stage (start|finish) <slug> --stage S [opts]     # auto-integration verb
+#
+# Exit codes: closed enum per bin/_fleet/exit_codes.py.
+set -e
+
+# Resolve repo root from this script's location: bin/fleet → REPO_ROOT
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Preserve the invoking directory for bin/_env_paths.project_root():
+# the cd below moves to the plugin/checkout root, which in installed-
+# plugin mode is NOT the adopter repo the CLI must operate on.
+export SPLOCK_CALLER_PWD="${SPLOCK_CALLER_PWD:-$PWD}"
+cd "$REPO_ROOT"
+
+# Venv activation: try project venv path; fall back to environment-PATH python.
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec "$(command -v python || command -v python3)" -m bin._fleet.main "$@"

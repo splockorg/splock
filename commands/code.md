@@ -319,6 +319,36 @@ WRAPPED_DIRECTIVE="$(bin/wrap --kind operator-directive --content "$directive")"
    summary, including the specific blocker description and the task-id
    it surfaced on.
 
+## Fleet auto-tracking (opt-in)
+
+When the project has opted into the fleet lifecycle tracker
+(`docs/plans/_fleet/_fleet_meta.json` exists — see `docs/FLEET.md`),
+the code stage is tracked on the fleet hub with no bookkeeping in this
+command's happy path: every `bin/update_orchestrator` transition
+already records a task-granular fleet event engine-side (`code` /
+`✈️ wip`). Two calls remain at the command level; both are silent
+no-ops (exit 0) when the project has not opted in, so run them
+unconditionally:
+
+- Once at command start (after the file-existence gate passes, before
+  spawning the coder):
+
+  ```bash
+  bin/fleet stage start <slug> --stage code --actor coder
+  ```
+
+- When the picker reports the plan is complete
+  (`bin/orchestrator-next-ready` exit 23, ALL_DONE) — record stage
+  completion before halting with the refusal phrase:
+
+  ```bash
+  bin/fleet stage finish <slug> --stage code --next /test --note "all tasks done"
+  ```
+
+Never hand-edit the hub's `FLEET:*` zones or the per-slug
+`_fleet.json` / `_fleet_log.jsonl` state files — `bin/fleet` is their
+only writer (the sealed-path hooks enforce it).
+
 ## Output
 
 The coder writes code directly via Edit/Write (its tools include the

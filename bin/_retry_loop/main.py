@@ -75,6 +75,7 @@ from . import (
 logger = logging.getLogger(__name__)
 
 from bin._env_paths import plans_dir as _env_paths_plans_dir
+from bin._fleet import auto as fleet_auto
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PLANS_DIR = _env_paths_plans_dir()
@@ -238,9 +239,9 @@ def main(argv: list[str] | None = None) -> int:
         return exit_codes.EXIT_USAGE
 
     if args.subcommand == "test-step":
-        return _run_test_step(args)
+        return _run_test_step_tracked(args)
     if args.subcommand == "boundary":
-        return _run_boundary(args)
+        return _run_boundary_tracked(args)
     if args.subcommand == "build-briefing":
         return _run_build_briefing(args)
     if args.subcommand == "junction":
@@ -281,13 +282,70 @@ def _phase_spawn_dispatch_kwargs(
             chain_id=chain_id,
             max_retries=None,
         )
-        return _run_test_step(ns)
+        return _run_test_step_tracked(ns)
     if phase == 4:
         return exit_codes.EXIT_OK
     _emit_stderr_json(
         {"error": "usage", "detail": f"unsupported --phase value: {phase}"}
     )
     return exit_codes.EXIT_USAGE
+
+
+def _run_test_step_tracked(args: argparse.Namespace) -> int:
+    """`_run_test_step` + fleet auto-integration (docs/FLEET.md).
+
+    Fleet hooks are silent no-ops unless the adopter project ran
+    `bin/fleet init`, and never raise into the loop. Verdict-carrying
+    halts (retry cap exhausted, HALT) flip the slug to `blocked`;
+    infrastructure errors append an event without a status flip.
+    """
+    fleet_auto.stage_started(args.slug, "test", actor="retry-loop")
+    rc = _run_test_step(args)
+    if rc == exit_codes.EXIT_OK:
+        fleet_auto.stage_finished(
+            args.slug, "test", actor="retry-loop", note="test-step green"
+        )
+    elif rc in (exit_codes.EXIT_RETRY_EXCEEDED, exit_codes.EXIT_PHASE_BOUNDARY_HALT):
+        fleet_auto.stage_blocked(
+            args.slug, "test", actor="retry-loop",
+            note=f"test-step halted (exit {rc})",
+        )
+    else:
+        fleet_auto.stage_event(
+            args.slug, "test", actor="retry-loop",
+            note=f"test-step errored (exit {rc})",
+        )
+    return rc
+
+
+def _run_boundary_tracked(args: argparse.Namespace) -> int:
+    """`_run_boundary` + fleet auto-integration (docs/FLEET.md).
+
+    The next action follows from the junction the review cleared
+    (`plan_to_implplan` → /implplan, `implplan_to_code` → /code).
+    """
+    fleet_auto.stage_started(
+        args.slug, "review", actor="retry-loop",
+        note=f"{args.boundary} review started",
+    )
+    rc = _run_boundary(args)
+    if rc == exit_codes.EXIT_OK:
+        fleet_auto.stage_finished(
+            args.slug, "review", actor="retry-loop",
+            next_action=fleet_auto.BOUNDARY_NEXT.get(args.boundary),
+            note=f"{args.boundary} review READY",
+        )
+    elif rc in (exit_codes.EXIT_RETRY_EXCEEDED, exit_codes.EXIT_PHASE_BOUNDARY_HALT):
+        fleet_auto.stage_blocked(
+            args.slug, "review", actor="retry-loop",
+            note=f"{args.boundary} review halted (exit {rc})",
+        )
+    else:
+        fleet_auto.stage_event(
+            args.slug, "review", actor="retry-loop",
+            note=f"{args.boundary} review errored (exit {rc})",
+        )
+    return rc
 
 
 def _run_test_step(args: argparse.Namespace) -> int:

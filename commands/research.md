@@ -146,6 +146,33 @@ THIS main agent's Write step — the read-only subagent only produces content.
    - **new-file**: Write to the next free `<slug>_research_<N>.md`.
    - **overwrite**: replace `<slug>_research.md` in place.
 
+## Fleet auto-tracking (opt-in)
+
+When the project has opted into the fleet lifecycle tracker
+(`docs/plans/_fleet/_fleet_meta.json` exists — see `docs/FLEET.md`),
+this command records stage start/completion on the fleet hub
+automatically. Both calls are silent no-ops (exit 0) when the project
+has not opted in, so run them unconditionally:
+
+- Immediately before spawning the research subagent (after the gate
+  checks pass):
+
+  ```bash
+  bin/fleet stage start <slug> --stage research --actor research-agent
+  ```
+
+- Immediately after the artifact Write lands:
+
+  ```bash
+  bin/fleet stage finish <slug> --stage research --note "<one-line outcome>"
+  ```
+
+  This flips the slug to `🕛 ready --next /plan` on the hub.
+
+Never hand-edit the hub's `FLEET:*` zones or the per-slug
+`_fleet.json` / `_fleet_log.jsonl` state files — `bin/fleet` is their
+only writer (the sealed-path hooks enforce it).
+
 ## Examples
 
 - `/research property_based_parser_hardening` — bare invocation, no

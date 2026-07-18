@@ -146,6 +146,33 @@ Bash dir-existence check before spawning:
 The driver-writes-not-subagent invariant (plan §D.6 criterion 5) is
 preserved: the subagent emits content; THIS main-agent turn writes it.
 
+## Fleet auto-tracking (opt-in)
+
+When the project has opted into the fleet lifecycle tracker
+(`docs/plans/_fleet/_fleet_meta.json` exists — see `docs/FLEET.md`),
+this command records stage start/completion on the fleet hub
+automatically. Both calls are silent no-ops (exit 0) when the project
+has not opted in, so run them unconditionally:
+
+- Immediately before spawning the recon subagent (after the gate
+  checks pass):
+
+  ```bash
+  bin/fleet stage start <slug> --stage recon --actor recon-agent
+  ```
+
+- Immediately after the artifact Write lands (step 6):
+
+  ```bash
+  bin/fleet stage finish <slug> --stage recon --note "<one-line outcome>"
+  ```
+
+  This flips the slug to `🕛 ready --next /qa` on the hub.
+
+Never hand-edit the hub's `FLEET:*` zones or the per-slug
+`_fleet.json` / `_fleet_log.jsonl` state files — `bin/fleet` is their
+only writer (the sealed-path hooks enforce it).
+
 ## Examples
 
 - `/recon property_based_parser_hardening` — bare invocation, no

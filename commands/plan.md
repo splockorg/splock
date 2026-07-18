@@ -267,6 +267,15 @@ Per implplan §A.impl.3a shared closed-enum:
        cleanly but the resulting plan no longer validates against
        `plan_v1`; the engine refuses to persist a schema-broken plan)
 
+## Fleet auto-tracking (opt-in)
+
+No command-level calls needed: when the project has opted into the
+fleet lifecycle tracker (`docs/plans/_fleet/_fleet_meta.json`
+exists — see `docs/FLEET.md`), `bin/plan` records `plan` / `✈️ wip`
+on start and `🕛 ready --next /implplan` on success engine-side
+(`--stdout` runs are not tracked). On a project that has not opted in
+this is a no-op.
+
 ## Cross-references
 
 - `bin/plan` — POSIX shell wrapper
