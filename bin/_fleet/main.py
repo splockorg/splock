@@ -411,6 +411,12 @@ def _cmd_spawn(args: argparse.Namespace) -> int:
 
 
 def _cmd_board(args: argparse.Namespace) -> int:
+    # Same silent-empty class as the render wrong-cwd defect (qum
+    # burn-in closeout, 2026-07-19): an uninitialized/wrong-cwd board
+    # showed "0 slugs · 0 live · $0" with exit 0 — wrong data dressed as
+    # a quiet fleet. Refuse like spawn/render do.
+    if not _require_initialized("board"):
+        return exit_codes.EXIT_FLEET_NOT_INITIALIZED
     b = board_mod.build_board()
     print(board_mod.render_json(b) if args.json_output else board_mod.render_text(b))
     return exit_codes.EXIT_OK

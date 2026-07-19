@@ -377,6 +377,23 @@ def test_board_never_crashes_on_empty_project(fleet_project, capsys):
     assert "nothing needs attention." in capsys.readouterr().out
 
 
+def test_board_refuses_uninitialized_wrong_cwd(tmp_path, monkeypatch, capsys):
+    """Same silent-empty class as the render wrong-cwd field defect
+    (2026-07-19): an uninitialized board must refuse, not show a quiet
+    empty fleet with exit 0."""
+    root = tmp_path / "not_a_fleet_repo"
+    (root / "docs" / "plans").mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(root))
+    monkeypatch.setenv("SPLOCK_CALLER_PWD", str(root))
+    rc = fleet_main(["board"])
+    assert rc == exit_codes.EXIT_FLEET_NOT_INITIALIZED
+    captured = capsys.readouterr()
+    assert "0 slugs" not in captured.out  # no empty-universe board
+    err = json.loads(captured.err.strip().splitlines()[-1])
+    assert err["error"] == "fleet_not_initialized"
+    assert str(root) in err["detail"]  # names where the lookup started
+
+
 # ---------------------------------------------------------------------------
 # resume
 # ---------------------------------------------------------------------------
