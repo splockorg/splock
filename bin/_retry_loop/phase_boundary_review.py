@@ -66,6 +66,7 @@ from __future__ import annotations
 import enum
 import logging
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -182,7 +183,32 @@ def run_boundary_review(
             plan_dir, task_id=boundary, cap=cap,
         )
         if remaining < 1:
-            # Counter pre-exhausted (Ralph or test-step already drained).
+            # Counter pre-exhausted (Ralph or test-step already drained,
+            # or a prior boundary run exhausted the cap).
+            if not records:
+                # This run did NO work — a re-invocation after a
+                # cap-exhaustion halt. Field defect (2026-07-19): this
+                # used to exit silently AND append a second, EMPTY halt
+                # entry ("Total iterations this halt: 0") to
+                # morning-review — indistinguishable from a transport
+                # failure, and the empty entry buried the real one.
+                # Diagnose loudly, write nothing.
+                print(
+                    f"boundary review pre-exhausted: retry counter "
+                    f"{cap}/{cap} for {boundary} (see "
+                    f"docs/plans/{slug}/morning-review/ for the original "
+                    f"halt); reset via `bin/verify boundary {slug} "
+                    f"--boundary {boundary} --fresh --chain-id <id>` or "
+                    f"chain resume",
+                    file=sys.stderr,
+                )
+                return BoundaryVerdict(
+                    terminal_shape=TerminalShape.HALT,
+                    rubric=last_rubric,
+                    records=records,
+                    counter_exhausted=True,
+                    halt_entry_path=None,
+                )
             entry_path = halt_handoff.write_halt_entry(
                 plan_dir,
                 slug=slug,

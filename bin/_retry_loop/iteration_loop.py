@@ -584,6 +584,57 @@ def unified_counter_get_remaining(
     return max(0, cap - used)
 
 
+def unified_counter_reset(plan_dir: Path, *, task_id: str) -> int:
+    """Reset per-task ``retry_count`` to 0 in ``_state.json``; return the
+    prior value.
+
+    The SANCTIONED operator reset behind `bin/verify boundary --fresh`
+    (first field deployment, 2026-07-19): the counter survives a
+    cap-exhaustion halt by design, but the only reset path used to be
+    the full ``bin/chain-overnight --from-resume`` machinery — a
+    heavyweight vehicle for "re-run one review" — while a hand edit of
+    the sealed `_state.json` is (correctly) hook-blocked. This helper
+    keeps the seal intact: same module, same flock RMW discipline as
+    :func:`unified_counter_increment`; the CLI layer logs the reset to
+    `_orchestrator_log.jsonl` so the audit trail records the intent.
+    """
+    state_path = plan_dir / "_state.json"
+    lock_path = plan_dir / "_state.json.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    import fcntl  # POSIX-only — WSL2/Ubuntu per CLAUDE.md execution-env rule
+
+    with open(lock_path, "a") as lock_fh:
+        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+        try:
+            state: dict[str, Any]
+            if state_path.exists():
+                try:
+                    state = json.loads(state_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    state = {}
+            else:
+                state = {}
+            tasks = state.setdefault("tasks", {})
+            if not isinstance(tasks, dict):
+                tasks = {}
+                state["tasks"] = tasks
+            entry = tasks.setdefault(task_id, {})
+            if not isinstance(entry, dict):
+                entry = {}
+                tasks[task_id] = entry
+            prior = int(entry.get("retry_count", 0))
+            entry["retry_count"] = 0
+
+            # Atomic write — temp + rename (same seam as increment).
+            from bin._render_plan.atomic_write import write_atomic
+
+            body = json.dumps(state, indent=2, sort_keys=True) + "\n"
+            write_atomic(state_path, body)
+            return prior
+        finally:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+
+
 # ----------------------------------------------------------------------
 # Operator-inject consumption (per-iteration single-shot)
 # ----------------------------------------------------------------------
