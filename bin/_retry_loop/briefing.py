@@ -758,6 +758,12 @@ Does every task in `<slug>_orchestrator.json` have a `tests_enabled`
 entry consistent with the plan's overall test discipline?
 - "consistent" / "mismatch"
 - If "mismatch": populate `R1_mismatched_task_ids`.
+- Exemption (real_tests_at_junctions SC3): a task with
+  `tests_enabled: []` whose row lists one or more
+  `verification_kinds` (the `verification_kind:` test_plan marker,
+  surfaced per task in `orchestrator_shape.depends_on_graph`) is
+  CONSISTENT — it is deliberately exempt from pytest grading and
+  verified by the declared kind instead. Do not flag markered tasks.
 
 ## R2 Concrete file paths and call sites
 Are file paths and call sites concrete (no "TBD"-shaped placeholders
@@ -1024,6 +1030,29 @@ def _read_plan_summary(plan_dir: Path, slug: str) -> dict[str, Any]:
     }
 
 
+def _verification_kinds(task: dict) -> list[str]:
+    """Declared verification_kind exemption kinds from a task's test_plan.
+
+    Mirrors the canonical marker contract
+    (`bin/_verify_plan/strict.py::VERIFICATION_KIND_MARKER_PREFIX`): a
+    marker is a test_plan entry whose `test_id` starts with the exact
+    `verification_kind:` prefix; the declared kind is the remainder.
+    Malformed/near-miss spellings are strict-lint's job, not the
+    briefing's — anything non-conforming simply doesn't surface here.
+    """
+    from bin._verify_plan.strict import VERIFICATION_KIND_MARKER_PREFIX
+
+    kinds: list[str] = []
+    for entry in task.get("test_plan", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        test_id = entry.get("test_id")
+        if isinstance(test_id, str) and test_id.startswith(
+                VERIFICATION_KIND_MARKER_PREFIX):
+            kinds.append(test_id[len(VERIFICATION_KIND_MARKER_PREFIX):].strip())
+    return kinds
+
+
 def _read_orchestrator_shape(plan_dir: Path, slug: str) -> dict[str, Any]:
     """Read ``<slug>_orchestrator.json`` and return a shape summary.
 
@@ -1051,6 +1080,16 @@ def _read_orchestrator_shape(plan_dir: Path, slug: str) -> dict[str, Any]:
                 "id": t.get("id"),
                 "depends_on": t.get("depends_on", []),
                 "tests_enabled": t.get("tests_enabled"),
+                # real_tests_at_junctions SC3: `tests_enabled: []` is
+                # legitimate iff test_plan carries a verification_kind
+                # exemption marker — but these rows used to omit
+                # test_plan entirely, so the marker was INVISIBLE to the
+                # boundary reviewer, who then flagged the task as an R1
+                # mismatch every iteration until the unified cap
+                # exhausted (first field deployment, 2026-07-19: two
+                # slugs deterministically exit-17'd on correctly-
+                # markered DAGs). Surface the declared kinds per row.
+                "verification_kinds": _verification_kinds(t),
             })
     return {
         "schema_version": data.get("schema_version"),
