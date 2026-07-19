@@ -113,6 +113,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sp_boundary.add_argument("slug", help="Plan slug.")
     sp_boundary.add_argument(
+        "--fresh",
+        action="store_true",
+        help=(
+            "Sanctioned operator reset of the persisted per-boundary "
+            "retry counter before running (the counter survives a "
+            "cap-exhaustion halt by design; without this the only reset "
+            "path is chain resume). Explicit intent — the reset is "
+            "logged to _orchestrator_log.jsonl."
+        ),
+    )
+    sp_boundary.add_argument(
         "--chain-id", required=True, help="Chain id for forensic logging."
     )
     sp_boundary.add_argument(
@@ -596,12 +607,63 @@ def _run_test_step(args: argparse.Namespace) -> int:
     return rc
 
 
+def _apply_fresh_reset(plan_dir: Path, *, slug: str, boundary: str,
+                       chain_id: str) -> int:
+    """`--fresh`: reset the persisted per-boundary retry counter.
+
+    Returns the prior count. The reset goes through the counter's own
+    sealed-file write path (`iteration_loop.unified_counter_reset` —
+    flock RMW + atomic write; the seal stays intact) and the intent is
+    logged to `_orchestrator_log.jsonl` best-effort so the audit trail
+    records WHO drained the counter and why a fourth-plus review ran.
+    """
+    prior = iteration_loop.unified_counter_reset(plan_dir, task_id=boundary)
+    try:
+        import hashlib
+
+        from bin._jsonl_log import append_row
+
+        digest = hashlib.sha1(
+            f"{chain_id}|boundary_fresh|{boundary}".encode("utf-8")
+        ).hexdigest()
+        append_row(
+            plan_dir,
+            {
+                "session_id": f"sess_{digest[:8]}",
+                "plan_slug": slug,
+                "chain_id": chain_id,
+                "task_id": None,
+                "transition": {"from": "wip", "to": "wip"},
+                "mode_at_transition": {"overnight": False, "guardrail": False},
+                "reason": (
+                    f"operator --fresh reset: {boundary} retry_count "
+                    f"{prior} -> 0"
+                ),
+                "event_type": "boundary_counter_reset",
+            },
+            emitted_by="bin/verify",
+        )
+    except Exception:  # noqa: BLE001 — best-effort log emit
+        logger.warning("boundary_counter_reset log row emit failed",
+                       exc_info=True)
+    print(
+        f"boundary counter reset: {boundary} retry_count {prior} -> 0 "
+        f"(logged to _orchestrator_log.jsonl)",
+        file=sys.stderr,
+    )
+    return prior
+
+
 def _run_boundary(args: argparse.Namespace) -> int:
     """Run the runtime §F.9 phase-boundary review gate."""
     try:
         plan_dir = _resolve_plan_dir(args.slug)
     except _UsageError:
         return exit_codes.EXIT_USAGE
+
+    if getattr(args, "fresh", False):
+        _apply_fresh_reset(plan_dir, slug=args.slug, boundary=args.boundary,
+                           chain_id=args.chain_id)
 
     # Operator-direct reviewer wiring (2026-06-10). Mirrors
     # _run_test_step: without an injected spawn_reviewer_fn,
@@ -673,8 +735,24 @@ def _run_boundary(args: argparse.Namespace) -> int:
             "rubric": verdict.rubric,
         }))
         return exit_codes.EXIT_OK
-    # HALT path — morning-review entry already written by run_boundary_review.
+    # HALT path — morning-review entry written by run_boundary_review,
+    # EXCEPT the pre-exhausted no-work case (halt_entry_path None), which
+    # deliberately writes nothing and gets a structured envelope instead
+    # so exit 17 is never silent (field defect, 2026-07-19: the bare
+    # exit read as a transport failure and cost a diagnostic cycle).
     if verdict.counter_exhausted:
+        if verdict.halt_entry_path is None and not verdict.records:
+            _emit_stderr_json({
+                "error": "phase_boundary_pre_exhausted",
+                "boundary": args.boundary,
+                "detail": (
+                    f"retry counter already exhausted for {args.boundary} "
+                    f"before this run (0 iterations spawned; no new "
+                    f"morning-review entry). See the original halt entry "
+                    f"under docs/plans/{args.slug}/morning-review/; reset "
+                    f"deliberately with --fresh, or resume the chain."
+                ),
+            })
         return exit_codes.EXIT_RETRY_EXCEEDED
     return exit_codes.EXIT_PHASE_BOUNDARY_HALT
 
