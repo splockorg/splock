@@ -247,7 +247,10 @@ def test_subject_under_review_is_not_a_wrapkind_member() -> None:
     (it is a structural delimiter like `<qa-rubric>`, not a
     provenance-named external-input kind). Pin that `subject-under-review`
     is NOT among the WrapKind literals, and that the enum still has its
-    seven members (no new entry was smuggled in to get the neutral label)."""
+    eight members (no new entry was smuggled in to get the neutral label;
+    count bumped 7 → 8 on 2026-07-18 for `eli5-subject`, a legitimate
+    provenance-named external-input kind — see the sibling pin in
+    test_qa_prompt_templates_include_delimiter_instruction.py)."""
     members = set(WrapKind.__args__)  # type: ignore[attr-defined]
     assert "subject-under-review" not in members
-    assert len(members) == 7
+    assert len(members) == 8

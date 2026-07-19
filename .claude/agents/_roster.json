@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "subagents": [
     "planner",
     "recon",
@@ -8,7 +8,8 @@
     "research",
     "coder",
     "reviewer",
-    "verifier"
+    "verifier",
+    "eli5"
   ],
-  "_comment": "Source-of-truth enum for orchestrator_v1.schema.json agent_assignment.subagent. Adding/removing roles requires schema-version bump per implplan §B.impl.3 + §D.impl.4. Hand-authored alongside the eight .claude/agents/*.md definitions per plan §D.8 cross-cutting rule #4 (no LLM emission). v2 (2026-05-23): added 'qna' for the question-and-answer subagent (operator-supplied question → answer + supporting evidence; distinct from 'qa' which is the adversarial-review subagent per feedback_qa_vs_qna_terminology.md)."
+  "_comment": "Source-of-truth enum for orchestrator_v1.schema.json agent_assignment.subagent. Adding/removing roles requires schema-version bump per implplan §B.impl.3 + §D.impl.4. Hand-authored alongside the nine agents/*.md definitions per plan §D.8 cross-cutting rule #4 (no LLM emission). v2 (2026-05-23): added 'qna' for the question-and-answer subagent (operator-supplied question → answer + supporting evidence; distinct from 'qa' which is the adversarial-review subagent). v3 (2026-07-18): added 'eli5', the plainspeak-translation lens (finds nothing new; distinct from both qa and qna per docs/feedback_eli5_terminology.md). Roster membership makes eli5 planner-assignable; that assignment is legal but unsupported in v1 — eli5 is an operator lens, never a gate (commands/eli5.md)."
 }

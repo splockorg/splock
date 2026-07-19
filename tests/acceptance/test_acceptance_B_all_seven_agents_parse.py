@@ -17,9 +17,11 @@ import re
 pytestmark = pytest.mark.acceptance
 
 
-# v2 (2026-05-24): added `qna` (question-and-answer subagent) per
-# feedback_qa_vs_qna_terminology.md and _roster.json schema bump to v2.
-EXPECTED_AGENTS = {"planner", "recon", "qa", "qna", "research", "coder", "reviewer", "verifier"}
+# v2 (2026-05-24): added `qna` (question-and-answer subagent) per the
+# qa-vs-qna terminology note and _roster.json schema bump to v2.
+# v3 (2026-07-18): added `eli5` (plainspeak-translation lens) per
+# docs/feedback_eli5_terminology.md and _roster.json schema bump to v3.
+EXPECTED_AGENTS = {"planner", "recon", "qa", "qna", "research", "coder", "reviewer", "verifier", "eli5"}
 REQUIRED_FRONTMATTER_KEYS = {"name", "description", "tools"}
 FRONTMATTER_RE = re.compile(r"\A---\s*\n(.+?)\n---\s*\n(.*)\Z", re.DOTALL)
 
