@@ -93,6 +93,7 @@ Manual updates remain for out-of-band changes:
 
 ```bash
 bin/fleet update <slug> --status parked --note "waiting on upstream" --render
+bin/fleet update <slug> --spawn-directive "ingest the qa recs in Call 1"
 bin/fleet state <slug>
 bin/fleet render --write
 ```
@@ -100,6 +101,50 @@ bin/fleet render --write
 **status** ∈ `ready` (next stage runnable) · `wip` (a stage in flight) ·
 `done` (pipeline gates cleared) · `blocked` · `parked` · `closed`
 (archived).
+
+## The prompt bay (generated next actions)
+
+First-field-deployment finding (qum, 2026-07-18): the one hub section
+fleet didn't generate — a hand-authored "Prompt Bay" of per-slug
+copy-paste kickoff blocks — rotted within a day (blocks survived three
+stage progressions unedited; a closed slug's block outlived its own
+archival). The root cause: the bay was *derived state expressed as
+hand-authored prose*, and fleet owned every input except one — the
+per-slug directive text that makes a spawn self-contained. Anything
+derived that isn't generated will rot, so both halves are now fleet's:
+
+- **The missing input is persisted.** `bin/fleet update <slug>
+  --spawn-directive "<operator context>"` stores that text in the
+  slug's `_fleet.json` (same contention-free write path as status). It
+  round-trips through `bin/fleet state` and `board --json`; `""`
+  clears it by hand.
+- **`spawn` consumes it.** With no `--prompt-suffix`, `bin/fleet spawn`
+  appends the stored directive to the child prompt; an explicit
+  `--prompt-suffix` (even `""`) overrides it for that spawn only.
+  Directives are **one-shot**: they target the stage about to run, so
+  any stage completion clears the slug's directive — the bay never
+  advertises consumed context to the next stage. (A `blocked` halt
+  keeps it, for the retry/resume.)
+- **The `FLEET:PROMPTS` zone renders only non-derived inputs.** Each
+  ready slug gets a runnable one-liner — `bin/fleet spawn <slug>
+  --stage <next>` — with the stored directive shown as an annotation,
+  never embedded in the command: model/effort/budget resolve from the
+  stage profile and the directive from state *at spawn time*, so a
+  pasted line cannot carry stale config. Blocked/parked slugs form a
+  held group with their blockers; wip/done/closed slugs drop
+  automatically — closeout can't leave husks.
+
+Hubs wired before this zone existed keep working unchanged (`render
+--write` skips the absent markers; the original three zones stay
+mandatory). To upgrade, re-run `bin/fleet migrate`: it wires ONLY
+missing zones — between `--prompts-start/--prompts-end` anchors, or
+appended as a compact marker block. Fresh `init` scaffolds include the
+zone.
+
+Doctrine (ADOPTION.md): retire hand-authored "what to run next"
+sections on fleet adoption. Narrative around the zones stays yours —
+wave gates, operator rulings, outside-repo hand-offs; the runnable
+next actions are generated.
 
 ## Safety properties
 
@@ -122,6 +167,93 @@ separate processes: 8 writers × 40 same-slug appends lose zero events,
 and a reader polling `_fleet.json` during update churn never observes a
 torn state file.
 
+## Headless C&C (`spawn` / `board` / `resume`)
+
+One parent session — the operator's single screen — forks **fresh,
+headless Claude Code sessions**, one per task, each with its own
+model/effort/permission config, running in the background on the
+operator's **subscription**. The parent absorbs only each child's final
+JSON result (a few KB), never its context; blockers centralize onto one
+board; any child is re-enterable by session id with its full context
+intact. Fresh-context-per-task AND nothing-ever-lost, simultaneously.
+
+```bash
+bin/fleet spawn <slug> --stage recon                  # profile-driven child
+bin/fleet spawn <slug> --stage code --model claude-fable-5 --effort xhigh \
+    --permission-mode acceptEdits --allowed-tools Bash Edit Write
+bin/fleet board                                       # states + live children +
+                                                      #   resume handles + cost
+bin/fleet resume <slug> --directive "the DB was down; retry the migration"
+```
+
+**Transport (billing-model constraint, not style):** children are
+spawned as `claude -p "/splock:<stage> <slug>" --output-format json`
+CLI subprocesses — never via the Claude Agent SDK, which is
+API-key-only by policy. Subscription OAuth works headless;
+`CLAUDE_CODE_OAUTH_TOKEN` is honored for detached contexts (cron/CI);
+`ANTHROPIC_API_KEY` is never read or required by the spawner. The child
+runs with cwd = the project root, so it reads the project's CLAUDE.md
+and inherits the fleet protocol; its own stage engines record
+`wip`/`ready`/`blocked` — the spawner adds no scaffolding of its own,
+only the slug's stored spawn directive (see §The prompt bay), which an
+explicit `--prompt-suffix` overrides.
+
+**Bookkeeping** stays per-slug: every spawn/resume appends to
+`docs/plans/<slug>/_fleet_runs.jsonl` (same append discipline as the
+event log) — a `spawned`/`resumed` row from the parent the moment the
+command returns, and a `completed`/`failed` row from the detached
+runner carrying `{session_id, total_cost_usd, is_error, denials,
+result_snippet}`. Full child JSON + runner log land at
+`docs/plans/_fleet/runs/<run_id>.{json,log}` (unique names — no shared
+write target). The board is a pure fold: lifecycle per slug, live
+children (runner pid), died runners, blocked slugs with copy-paste
+resume commands, and the cumulative pool draw — torn rows and dead
+children degrade to rendered warnings, never a crash. On subscription
+OAuth the CLI's `total_cost_usd` is a notional API-rate equivalent (a
+pool-draw meter, not billing), so the text board labels it "est. pool
+draw"; `board --json` keeps the CLI-native `cost_usd` keys.
+
+**Per-stage profiles** live in `_fleet_meta.json` (absent keys fall
+through to the claude CLI's own defaults; CLI flags > stage profile >
+`_defaults`):
+
+```json
+"profiles": {
+  "_defaults": {"permission_mode": "default"},
+  "code":  {"model": "claude-fable-5", "effort": "xhigh",
+             "permission_mode": "acceptEdits",
+             "allowed_tools": ["Bash", "Edit", "Write"]},
+  "recon": {"model": "claude-opus-4-8", "effort": "high"}
+},
+"max_concurrent": 4,
+"command_template": "/splock:{stage} {slug}"
+```
+
+`max_concurrent` exists because all children draw ONE subscription pool
+(5-hour/weekly limits); `--max-budget-usd` adds a per-child spend
+ceiling. A qum-era meta without these keys works unchanged (zero
+migration): defaults apply.
+
+**Verified platform facts** (live spike, 2026-07-18, CLI 2.1.214 —
+re-verify before relying on version-sensitive behavior):
+
+- `--output-format json` returns `{result, session_id, total_cost_usd,
+  is_error, permission_denials, modelUsage, num_turns, usage, …}`.
+- Headless `claude -p --resume <session_id> "<directive>"` re-enters
+  with full context; the session id is unchanged (`--fork-session` to
+  mint a new one).
+- Under headless `default` permission mode a denied tool call is
+  recorded in `permission_denials` and the child completes gracefully
+  (`is_error: false`) — the board treats a non-empty denial list as a
+  needs-attention signal alongside fleet-status `blocked`.
+- Per-child `--model`, `--effort low|medium|high|xhigh|max`,
+  `--permission-mode`, `--allowedTools`, `--max-budget-usd` all exist
+  as first-class flags.
+- Subscription OAuth works with `ANTHROPIC_API_KEY` unset (verified by
+  spawning with the var explicitly removed).
+- The `ultracode` keyword does **not** activate in `-p` children (no
+  system reminder observed) — do not rely on it in child prompts.
+
 ## Files
 
 - `bin/fleet` — POSIX wrapper → `python -m bin._fleet.main`.
@@ -130,5 +262,10 @@ torn state file.
 - `bin/_fleet/seed.py` — one-time state seeding from operator JSON.
 - `bin/_fleet/auto.py` — the engine-side stage hooks + the canonical
   stage → next-command map.
+- `bin/_fleet/runs.py` — the per-slug C&C runs ledger.
+- `bin/_fleet/spawn.py` + `spawn_runner.py` — headless child spawner
+  (CLI-subprocess transport) + the detached result-capturing runner.
+- `bin/_fleet/board.py` — the C&C fold (`fleet board [--json]`).
 - `bin/_fleet/exit_codes.py` — closed enum (45 =
-  `fleet_not_initialized`, 46 = `hub_anchor_missing`).
+  `fleet_not_initialized`, 46 = `hub_anchor_missing`, 47 =
+  `spawn_refused`, 48 = `no_session`).

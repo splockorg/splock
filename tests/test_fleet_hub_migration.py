@@ -158,6 +158,67 @@ def test_migrate_unanchored_zones_are_appended(hand_hub_project):
     assert text.count("FLEET:BOARD:BEGIN") == 1
 
 
+def _strip_prompts_zone(hub_md: Path) -> None:
+    """Rebuild the hub as a pre-PROMPTS wiring (three zones, protocol)."""
+    text = hub_md.read_text(encoding="utf-8")
+    begin, end = engine.MARKERS["prompts"]
+    keep = [ln for ln in text.splitlines()
+            if ln not in (begin, end, hub._ZONE_HEADINGS["prompts"])]
+    hub_md.write_text("\n".join(keep) + "\n", encoding="utf-8")
+
+
+def test_migrate_upgrades_a_pre_prompts_hub(hand_hub_project, capsys):
+    """A hub migrated before the PROMPTS zone existed gains ONLY that zone
+    on re-run — no duplicate section header or protocol, wired zones
+    untouched."""
+    assert fleet_main(["migrate"]) == exit_codes.EXIT_OK
+    _strip_prompts_zone(hand_hub_project)
+    before = hand_hub_project.read_text(encoding="utf-8")
+    assert "FLEET:PROMPTS" not in before
+
+    assert fleet_main(["migrate"]) == exit_codes.EXIT_OK
+    assert "PROMPTS zone (0 anchored, 1 appended)" in capsys.readouterr().out
+    text = hand_hub_project.read_text(encoding="utf-8")
+    for begin, end in engine.MARKERS.values():
+        assert text.count(begin) == 1 and text.count(end) == 1
+    assert text.count(hub.SECTION_MARKER) == 1  # no duplicated header
+    assert text.count(hub.PROTOCOL_MARKER) == 1
+    # …and the upgraded hub renders all four zones
+    engine.update("some_slug", stage="qa", status="ready",
+                  next_action="/plan", actor="t")
+    assert fleet_main(["render", "--write"]) == exit_codes.EXIT_OK
+    assert ("- `bin/fleet spawn some_slug --stage plan`"
+            in hand_hub_project.read_text(encoding="utf-8"))
+
+    # a third migrate is a full no-op again
+    before = hand_hub_project.read_bytes()
+    assert fleet_main(["migrate"]) == exit_codes.EXIT_OK
+    assert hand_hub_project.read_bytes() == before
+
+
+def test_migrate_upgrade_honors_prompts_anchors(hand_hub_project):
+    assert fleet_main([
+        "migrate",
+        "--now-start", "## Runnable now", "--now-end", "## Status board",
+        "--board-start", "## Status board", "--board-end", "## History",
+        "--recent-start", "## History", "--recent-end", "## Changelog",
+    ]) == exit_codes.EXIT_OK
+    _strip_prompts_zone(hand_hub_project)
+
+    # the operator anchors the new zone into a marker-free span; re-running
+    # with the ORIGINAL anchor set for the wired zones stays safe (ignored)
+    assert fleet_main([
+        "migrate",
+        "--now-start", "## Runnable now", "--now-end", "## Status board",
+        "--prompts-start", "## Changelog", "--prompts-end", "- day one",
+    ]) == exit_codes.EXIT_OK
+    text = hand_hub_project.read_text(encoding="utf-8")
+    begin, _ = engine.MARKERS["prompts"]
+    assert text.count(begin) == 1
+    assert text.find("## Changelog") < text.find(begin) < text.find("- day one")
+    assert text.count(engine.MARKERS["now"][0]) == 1  # wired zone untouched
+
+
 def test_migrate_is_idempotent(hand_hub_project, capsys):
     assert fleet_main(["migrate"]) == exit_codes.EXIT_OK
     after_first = hand_hub_project.read_bytes()

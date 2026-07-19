@@ -25,6 +25,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -46,17 +47,27 @@ STATUS_ORDER = {"wip": 0, "ready": 1, "blocked": 2, "done": 3, "parked": 4, "clo
 
 MARKERS = {  # zone → (begin, end)
     "now": ("<!-- FLEET:NOW:BEGIN -->", "<!-- FLEET:NOW:END -->"),
+    "prompts": ("<!-- FLEET:PROMPTS:BEGIN -->", "<!-- FLEET:PROMPTS:END -->"),
     "board": ("<!-- FLEET:BOARD:BEGIN -->", "<!-- FLEET:BOARD:END -->"),
     "recent": ("<!-- FLEET:RECENT:BEGIN -->", "<!-- FLEET:RECENT:END -->"),
 }
+
+#: Zones a hub may lack without failing `render --write`: pre-PROMPTS
+#: hubs keep working unchanged until `bin/fleet migrate` wires the new
+#: markers in. The original three zones stay mandatory.
+OPTIONAL_ZONES = ("prompts",)
 
 # Keeps every event line comfortably under PIPE_BUF (4096 bytes) so the
 # single O_APPEND write stays atomic on a local FS even with maximal
 # non-note fields.
 MAX_NOTE_CHARS = 1000
 
-# Updatable state fields, in the reference's merge order.
-STATE_FIELDS = ("stage", "status", "next", "blockers", "piece", "wave", "actor")
+# Updatable state fields, in the reference's merge order. spawn_directive
+# is the splock addition: per-slug operator context that `fleet spawn`
+# appends to the child prompt — the one derived-state input the reference
+# left in hand-authored prose ("prompt bays"), where it rotted.
+STATE_FIELDS = ("stage", "status", "next", "blockers", "piece", "wave", "actor",
+                "spawn_directive")
 
 
 class HubMarkersMissing(Exception):
@@ -163,9 +174,13 @@ def update(
     wave: int | None = None,
     actor: str | None = None,
     note: str | None = None,
+    spawn_directive: str | None = None,
 ) -> dict:
     """Merge non-None fields into the slug's state, save it atomically,
     and append one event. Returns the saved state.
+
+    `spawn_directive=""` clears a stored directive (empty is falsy at
+    every read site — spawn and the prompt bay treat it as absent).
 
     Raises ValueError when the merged status is not in the vocabulary
     (the CLI maps that to a usage exit).
@@ -180,6 +195,7 @@ def update(
         "piece": piece,
         "wave": wave,
         "actor": actor,
+        "spawn_directive": spawn_directive,
     }
     for field in STATE_FIELDS:
         v = incoming[field]
@@ -253,6 +269,82 @@ def render_now(states: dict[str, dict], meta: dict) -> str:
     return "\n".join(rows)
 
 
+#: `next` values that map to a runnable spawn one-liner: a single stage
+#: command token ("/qa", "/plan", installed-plugin "/splock:code", …).
+#: Anything else ("closeout", "—", free prose) is not spawnable.
+_SPAWNABLE_NEXT = re.compile(r"^/(?:splock:)?([a-z][a-z0-9_]*)$")
+
+#: Display clamp for stored directives in the prompt bay. The state file
+#: keeps the full text (`bin/fleet state <slug>`); the zone stays readable.
+MAX_DIRECTIVE_DISPLAY = 600
+
+
+def _directive_display(state: dict) -> str | None:
+    text = " ".join((state.get("spawn_directive") or "").split())
+    if not text:
+        return None
+    if len(text) > MAX_DIRECTIVE_DISPLAY:
+        text = text[: MAX_DIRECTIVE_DISPLAY - 1] + "…"
+    return text
+
+
+def render_prompts(states: dict[str, dict], meta: dict) -> str:
+    """The generated prompt bay: per-slug next actions as runnable
+    `bin/fleet spawn` one-liners.
+
+    A one-liner carries ONLY the non-derived inputs (slug + next stage).
+    Model/effort/budget resolve from the stage profile and the stored
+    `spawn_directive` is applied by `spawn` itself at spawn time, so a
+    pasted line can never carry stale config — embedding the directive
+    text here would re-capture it at render time, the rot class this
+    zone exists to kill. Blocked/parked slugs form the held group with
+    their blockers; wip, done, and closed slugs drop automatically.
+    """
+    roster = meta.get("roster", {})
+
+    def wave_key(slug: str):
+        return (roster.get(slug, {}).get("wave", 99), slug)
+
+    def directive_lines(state: dict) -> list[str]:
+        d = _directive_display(state)
+        return [f"  - directive: {d}"] if d else []
+
+    ready = sorted((s for s, st in states.items() if st.get("status") == "ready"),
+                   key=wave_key)
+    held = sorted((s for s, st in states.items()
+                   if st.get("status") in ("blocked", "parked")),
+                  key=lambda s: (states[s].get("status") != "blocked", *wave_key(s)))
+    if not ready and not held:
+        return "_Nothing to spawn — no ready or held slugs._"
+
+    lines: list[str] = []
+    if ready:
+        lines += ["**Ready now** — `spawn` applies the stage profile and the "
+                  "stored directive itself; store one with `bin/fleet update "
+                  '<slug> --spawn-directive "…"`.', ""]
+        for s in ready:
+            st = states[s]
+            m = _SPAWNABLE_NEXT.match((st.get("next") or "").strip())
+            if m:
+                lines.append(f"- `bin/fleet spawn {s} --stage {m.group(1)}`")
+            else:
+                lines.append(f"- `{s}` — next: {st.get('next') or '—'} "
+                             "(not a stage command — run by hand)")
+            lines += directive_lines(st)
+    if held:
+        if ready:
+            lines.append("")
+        lines += ["**Held** — resolve, flip to `ready`, and the spawn line "
+                  "appears above.", ""]
+        for s in held:
+            st = states[s]
+            status = st.get("status")
+            lines.append(f"- `{s}` — {GLYPH.get(status, '?')} {status}: "
+                         f"{st.get('blockers') or 'see log'}")
+            lines += directive_lines(st)
+    return "\n".join(lines)
+
+
 def render_recent(events: list[dict], n: int = 8) -> str:
     if not events:
         return "_No events logged yet._"
@@ -269,12 +361,13 @@ def render_recent(events: list[dict], n: int = 8) -> str:
 
 
 def render_zones() -> dict[str, str]:
-    """Fold every per-slug file into the three zone bodies."""
+    """Fold every per-slug file into the zone bodies."""
     states = load_all_states()
     events = load_all_events()
     meta = load_meta()
     return {
         "now": render_now(states, meta),
+        "prompts": render_prompts(states, meta),
         "board": render_board(states, meta),
         "recent": render_recent(events),
     }
@@ -303,6 +396,7 @@ def render_hub_write() -> tuple[int, int]:
     meta = load_meta()
     zones = {
         "now": render_now(states, meta),
+        "prompts": render_prompts(states, meta),
         "board": render_board(states, meta),
         "recent": render_recent(events),
     }
@@ -310,6 +404,9 @@ def render_hub_write() -> tuple[int, int]:
     with open(hub, encoding="utf-8") as f:
         text = f.read()
     for z, body in zones.items():
+        begin, end = MARKERS[z]
+        if z in OPTIONAL_ZONES and begin not in text and end not in text:
+            continue  # pre-PROMPTS hub: the three-zone contract stands
         text = _replace_zone(text, z, body)
     tmp = f"{hub}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:

@@ -34,3 +34,13 @@ EXIT_HUB_ANCHOR_MISSING = 46
 """`migrate` could not find a requested anchor, or `render --write`
 found a hub whose `FLEET:*` markers are absent. In both cases the hub
 file is left byte-identical (verify-before-swap)."""
+
+EXIT_SPAWN_REFUSED = 47
+"""`spawn`/`resume` refused before launching anything: the concurrency
+cap is reached (all children draw one subscription pool), the slug dir
+is missing, or the `claude` CLI is not on PATH."""
+
+EXIT_NO_SESSION = 48
+"""`resume` found no session handle in the slug's `_fleet_runs.jsonl`
+ledger (nothing was ever spawned/completed for it, or the ledger rows
+carrying `session_id` were lost)."""

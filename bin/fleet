@@ -7,13 +7,17 @@
 # activation + repo-root resolution.
 #
 # Subcommands:
-#   update <slug> [--stage S] [--status S] [--next N] [--actor A] [--note N] [--render]
+#   update <slug> [--stage S] [--status S] [--next N] [--actor A] [--note N]
+#                 [--spawn-directive TEXT] [--render]
 #   render [--write]
 #   state <slug>
 #   init [--hub <existing .md>]
 #   seed --from <seed.json> [--force] [--events]
 #   migrate [--now-start S --now-end E] [...] [--dry-run]
 #   stage (start|finish) <slug> --stage S [opts]     # auto-integration verb
+#   spawn <slug> --stage S [--model M] [--effort E] [opts]   # headless C&C
+#   board [--json]                                            # C&C view
+#   resume <slug> [--session SID] [--directive TEXT] [opts]   # re-enter child
 #
 # Exit codes: closed enum per bin/_fleet/exit_codes.py.
 set -e

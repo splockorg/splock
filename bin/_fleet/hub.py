@@ -47,9 +47,9 @@ PROTOCOL = f"""{PROTOCOL_MARKER}
 ## ⚙️ Fleet protocol (concurrency-safe)
 
 **Status lives in per-slug files, NOT this .md.** Never hand-edit the `FLEET:*`
-zones (▶ Now, the status board, recent events) — they are generated. State is
-updated with ONE command (a fast, collision-free append — no read-modify-write
-of this file):
+zones (▶ Now, the prompt bay, the status board, recent events) — they are
+generated. State is updated with ONE command (a fast, collision-free append —
+no read-modify-write of this file):
 
 ```bash
 bin/fleet update <slug> --stage <stage> --status <status> \\
@@ -71,6 +71,11 @@ bin/fleet render --write          # regenerate the derived zones
 - **Why this is contention-free:** per-slug files have no shared write target,
   so any number of agents update concurrently — no clobbering, no
   stale-snapshot re-reads of this file.
+- **Next actions are generated too:** the prompt bay zone renders a
+  `bin/fleet spawn` one-liner per ready slug — never hand-author paste blocks.
+  Per-slug spawn context is stored with `bin/fleet update <slug>
+  --spawn-directive "…"` (one-shot: the stage that consumed it clears it on
+  completion) and applied by `spawn` itself.
 - Cross-slug structure (waves · roster · legend) is
   `docs/plans/_fleet/_fleet_meta.json` (rare, single author).
 - Hand-authored narrative stays hand-editable; only `FLEET:*` zones are
@@ -81,6 +86,7 @@ SECTION_MARKER = "<!-- FLEET:SECTION -->"
 
 _ZONE_HEADINGS = {
     "now": "### ▶ Now — actionable slugs",
+    "prompts": "### 🎛 Prompt bay — next actions",
     "board": "### 📋 Status board",
     "recent": "### 🕘 Recent events",
 }
@@ -102,6 +108,23 @@ def _generated_section(zones: list[str]) -> str:
     for zone in zones:
         parts += ["", _ZONE_HEADINGS[zone], "", _zone_block(zone)]
     return "\n".join(parts) + "\n"
+
+
+def _upgrade_blocks(zones: list[str]) -> str:
+    """Marker blocks appended when SOME zones are already wired (a hub
+    migrated before a zone existed): one compact sub-section per zone,
+    no duplicate `## 🛰️ Fleet status` header."""
+    parts: list[str] = []
+    for zone in zones:
+        parts += [
+            _ZONE_HEADINGS[zone],
+            "",
+            "_Generated zone — never hand-edit; run `bin/fleet render --write`._",
+            "",
+            _zone_block(zone),
+            "",
+        ]
+    return "\n".join(parts)
 
 
 DEFAULT_LEGEND = {
@@ -129,7 +152,7 @@ def _scaffold_hub_text(project_name: str) -> str:
         "tracker. Narrative sections you add outside the marked zones are "
         "yours; the zones below are build artifacts._\n"
         "\n"
-        f"{_generated_section(['now', 'board', 'recent'])}"
+        f"{_generated_section(list(engine.MARKERS))}"
         "\n"
         f"{PROTOCOL}"
     )
@@ -171,6 +194,19 @@ def init(hub: str | None = None) -> tuple[bool, Path]:
         "closed": [],
         "roster": {},
         "hub": hub_rel,
+        # ── headless C&C (bin/fleet spawn/board/resume) ──
+        # Per-stage child profiles: model / effort / permission_mode /
+        # allowed_tools / max_budget_usd, with "_defaults" as the base
+        # layer. CLI flags override the stage profile which overrides
+        # "_defaults". All keys optional — an absent key falls through
+        # to the claude CLI's own defaults.
+        "profiles": {"_defaults": {}},
+        # All children draw ONE subscription pool (5-h/weekly limits).
+        "max_concurrent": 4,
+        # The headless child's prompt; {stage}/{slug} are substituted.
+        # "/splock:<stage>" is the installed-plugin spelling — drop the
+        # "splock:" prefix for sideloaded/in-tree checkouts.
+        "command_template": "/splock:{stage} {slug}",
     }
     engine.save_meta(meta)
 
@@ -194,8 +230,12 @@ def migrate(
     anchored are appended in one generated section. The whole
     transformation lands in a single atomic swap.
 
-    Returns a one-line status message. Idempotent: a hub that already
-    carries any `FLEET:*` marker is a no-op.
+    Returns a one-line status message. Idempotent: zones whose markers
+    are already present are left untouched (their anchors, if given, are
+    ignored) — so a hub wired before a zone existed (e.g. pre-PROMPTS)
+    is UPGRADED by re-running migrate: only the missing zone lands,
+    anchored or appended as a compact block (no duplicate section
+    header). All markers present → no-op.
     """
     anchors = anchors or {}
     meta = engine.load_meta()
@@ -203,15 +243,20 @@ def migrate(
     with open(hub, encoding="utf-8") as f:
         text = f.read()
 
-    if any(begin in text for begin, _ in engine.MARKERS.values()):
+    for zone in anchors:
+        if zone not in engine.MARKERS:
+            raise ValueError(f"unknown zone {zone!r} (need one of {sorted(engine.MARKERS)})")
+
+    wired = [z for z, (begin, _) in engine.MARKERS.items() if begin in text]
+    to_wire = [z for z in engine.MARKERS if z not in wired]
+    if not to_wire:
         return "already migrated (markers present) — no-op"
+    anchors = {z: a for z, a in anchors.items() if z in to_wire}
 
     # ── verify EVERY anchor before transforming anything ──────────────
     missing: list[str] = []
     spans: dict[str, tuple[int, int]] = {}
     for zone, (start, end) in anchors.items():
-        if zone not in engine.MARKERS:
-            raise ValueError(f"unknown zone {zone!r} (need one of {sorted(engine.MARKERS)})")
         i = text.find(start)
         if i == -1:
             missing.append(f"{zone}: start {start}")
@@ -236,13 +281,17 @@ def migrate(
     for zone, (i, j) in sorted(spans.items(), key=lambda kv: kv[1][0], reverse=True):
         text = text[:i] + "\n\n" + _zone_block(zone) + "\n\n" + text[j:]
 
-    unanchored = [z for z in ("now", "board", "recent") if z not in anchors]
+    unanchored = [z for z in to_wire if z not in anchors]
     if unanchored:
         if not text.endswith("\n"):
             text += "\n"
-        text += "\n" + _generated_section(unanchored)
+        # Fresh migration: one generated section. Upgrade (some zones
+        # already wired): compact per-zone blocks — no duplicate header.
+        text += "\n" + (_upgrade_blocks(unanchored) if wired
+                        else _generated_section(unanchored))
 
-    if PROTOCOL_MARKER not in text:
+    protocol_added = PROTOCOL_MARKER not in text
+    if protocol_added:
         if not text.endswith("\n"):
             text += "\n"
         text += "\n" + PROTOCOL
@@ -251,7 +300,9 @@ def migrate(
         return f"dry-run: would migrate {hub} ({len(spans)} anchored, {len(unanchored)} appended)"
 
     _atomic_write_text(hub, text)  # single atomic swap
+    zones_label = " / ".join(z.upper() for z in to_wire)
     return (
-        f"migrated {hub}: NOW / BOARD / RECENT zones "
-        f"({len(spans)} anchored, {len(unanchored)} appended) + fleet protocol"
+        f"migrated {hub}: {zones_label} zone{'s' if len(to_wire) != 1 else ''} "
+        f"({len(spans)} anchored, {len(unanchored)} appended)"
+        + (" + fleet protocol" if protocol_added else "")
     )

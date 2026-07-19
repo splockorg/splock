@@ -79,7 +79,20 @@ and engines record `wip` on start and `ready --next <next stage>` (or
 never hand-edit the hub, and the per-slug state files are sealed so
 they can't. Opt in with `bin/fleet init`; convert an existing
 hand-edited launcher with `bin/fleet init --hub` + `migrate` + `seed`.
-See `docs/FLEET.md`.
+
+fleet also ships a headless C&C surface: `bin/fleet spawn` forks a
+fresh headless Claude Code session per task (CLI subprocess on the
+operator's subscription — never the API-key-only SDK), each with its
+own model/effort/permission profile; `bin/fleet board` is the single
+screen showing lifecycle, live children, blockers with copy-paste
+resume handles, and cumulative est. pool draw; `bin/fleet resume <slug>`
+re-enters a blocked child's exact session with its context intact.
+Next actions are generated too: the hub's prompt-bay zone renders a
+runnable `bin/fleet spawn` one-liner per ready slug, and the per-slug
+context that makes a spawn self-contained is stored once
+(`bin/fleet update <slug> --spawn-directive "…"`) and applied by
+`spawn` itself — hand-authored prompt bays are retired on adoption
+(derived state that isn't generated rots). See `docs/FLEET.md`.
 
 ---
 

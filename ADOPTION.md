@@ -166,7 +166,12 @@ task until the pinned verifier confirms a green test run.
 
 Running several slugs at once? Opt into the fleet status hub
 (`bin/fleet init`) and every stage run above starts tracking itself on a
-generated, contention-free status board — see `docs/FLEET.md`.
+generated, contention-free status board — see `docs/FLEET.md`. When you
+adopt, retire any hand-authored "what to run next" / prompt-bay section
+of your launcher: the generated `FLEET:PROMPTS` zone replaces it (store
+per-slug spawn context with `bin/fleet update <slug> --spawn-directive
+"…"`). Derived state that isn't generated rots — narrative stays yours,
+runnable next actions are the tracker's.
 
 ---
 
