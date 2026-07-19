@@ -90,6 +90,7 @@ from .subject import (
 
 
 from bin._env_paths import plans_dir as _env_paths_plans_dir
+from bin._fleet import auto as fleet_auto
 
 # The adopter's plan dir, not the plugin's: in installed-plugin mode this file
 # sits under the plugin cache, so a `parents[2]` walk resolves the wrong repo.
@@ -458,6 +459,11 @@ def main(argv: list[str] | None = None) -> int:
         _emit_stderr_json({"error": "usage", "detail": str(exc)})
         return exit_codes.EXIT_USAGE
 
+    # fleet auto-integration (docs/FLEET.md): stage start = wip. A silent
+    # no-op unless the adopter project ran `bin/fleet init`; never raises.
+    if not getattr(args, "stdout", False):
+        fleet_auto.stage_started(args.slug, "qa", actor="qa-engine")
+
     try:
         result: QaResult = invoke_qa(
             slug=args.slug,
@@ -502,6 +508,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"New file: wrote {target.resolve()}", file=sys.stderr)
         else:  # append
             print(f"Appended: extended {target.resolve()}", file=sys.stderr)
+
+    # fleet auto-integration: stage completion = ready, next stage queued.
+    fleet_auto.stage_finished(
+        args.slug, "qa", actor="qa-engine", note=f"qa written → {target.name}"
+    )
 
     return exit_codes.EXIT_OK
 

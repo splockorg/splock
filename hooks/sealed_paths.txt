@@ -29,6 +29,12 @@ docs/plans/*/_completion_summary_*.md
 docs/plans/*/_baseline/**
 docs/plans/*/_regression_cases/**
 docs/plans/*/morning-review/**
+# fleet lifecycle tracker (docs/FLEET.md): per-slug state + append-only
+# event log are mutated ONLY via `bin/fleet` (or the automatic stage
+# hooks); the generated hub zones re-render from them. The cross-slug
+# meta (docs/plans/_fleet/_fleet_meta.json) stays operator-editable.
+docs/plans/*/_fleet.json
+docs/plans/*/_fleet_log.jsonl
 
 # --- agent-session intent registry ---
 # The intent registry's local journal (append-only via `bin/intent`).

@@ -173,6 +173,33 @@ the DIRECTIVE channel only (never the question text).
    - **new-file**: Write to the next free `<slug>_qna_<N>.md`.
    - **overwrite**: replace `<slug>_qna.md` in place.
 
+## Fleet auto-tracking (opt-in)
+
+When the project has opted into the fleet lifecycle tracker
+(`docs/plans/_fleet/_fleet_meta.json` exists — see `docs/FLEET.md`),
+this command records stage start/completion on the fleet hub
+automatically. Both calls are silent no-ops (exit 0) when the project
+has not opted in, so run them unconditionally:
+
+- Immediately before spawning the qna subagent (after the gate checks
+  pass):
+
+  ```bash
+  bin/fleet stage start <slug> --stage qna --actor qna-agent
+  ```
+
+- Immediately after the artifact Write lands:
+
+  ```bash
+  bin/fleet stage finish <slug> --stage qna --note "<one-line outcome>"
+  ```
+
+  This flips the slug to `🕛 ready --next /plan` on the hub.
+
+Never hand-edit the hub's `FLEET:*` zones or the per-slug
+`_fleet.json` / `_fleet_log.jsonl` state files — `bin/fleet` is their
+only writer (the sealed-path hooks enforce it).
+
 ## Examples
 
 - `/qna brand_handoff_gate why does the gate refuse Cavallini?` —

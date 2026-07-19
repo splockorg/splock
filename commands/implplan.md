@@ -172,6 +172,15 @@ Per implplan §A.impl.3a shared closed-enum:
 - 16 = SDK retry exhausted — operator edits schema or re-does recon /
        research and re-runs
 
+## Fleet auto-tracking (opt-in)
+
+No command-level calls needed: when the project has opted into the
+fleet lifecycle tracker (`docs/plans/_fleet/_fleet_meta.json`
+exists — see `docs/FLEET.md`), `bin/implplan` records `implplan` /
+`✈️ wip` on start and `🕛 ready --next /code` on success engine-side
+(`--stdout` runs are not tracked). On a project that has not opted in
+this is a no-op.
+
 ## Cross-references
 
 - `bin/implplan` — POSIX shell wrapper

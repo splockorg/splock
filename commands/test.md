@@ -65,6 +65,15 @@ fired without parsing morning-review.
 - The Sonnet reviewer's R1-R5 verdicts are written via the substrate;
   the slash command does NOT need to surface them separately.
 
+## Fleet auto-tracking (opt-in)
+
+No command-level calls needed: when the project has opted into the
+fleet lifecycle tracker (`docs/plans/_fleet/_fleet_meta.json`
+exists — see `docs/FLEET.md`), `bin/verify test-step` records
+`test` / `✈️ wip` on start, `🕛 ready --next /review` on a green run,
+and `❌ blocked` on a verdict-carrying halt (retry cap / HALT)
+engine-side. On a project that has not opted in this is a no-op.
+
 ## Cross-references
 
 - `bin/verify` — POSIX wrapper

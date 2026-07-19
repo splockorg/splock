@@ -200,6 +200,15 @@ Per the closed enum in `bin/_qa/exit_codes.py`:
 - 17 = SDK call failed (qa's analogue of `/plan`'s exit 16; distinct
        numeric so callers can disambiguate)
 
+## Fleet auto-tracking (opt-in)
+
+No command-level calls needed: when the project has opted into the
+fleet lifecycle tracker (`docs/plans/_fleet/_fleet_meta.json`
+exists — see `docs/FLEET.md`), `bin/qa` records `qa` / `✈️ wip` on
+start and `🕛 ready --next /plan` on success engine-side (`--stdout`
+runs are not tracked). On a project that has not opted in this is a
+no-op.
+
 ## Cross-references
 
 - `bin/qa` — POSIX shell wrapper

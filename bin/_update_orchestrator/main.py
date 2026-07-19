@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from bin._env_paths import project_root
+from bin._fleet import auto as fleet_auto
 
 from .canonical_transitions import (
     VERDICT_ALLOW,
@@ -432,6 +433,12 @@ def _dispatch_close(args: argparse.Namespace, plan_dir: Path) -> int:
             f"Closed {args.slug} ({result.closed_at}): lifecycle=closed",
             file=sys.stderr,
         )
+        # fleet auto-integration (docs/FLEET.md): archive the slug on the
+        # hub. Silent no-op unless the project ran `bin/fleet init`.
+        fleet_auto.slug_closed(
+            args.slug,
+            note=args.reason or "orchestrator closed (bin/update_orchestrator --close)",
+        )
     return EXIT_OK
 
 
@@ -531,6 +538,11 @@ def _dispatch_base(args: argparse.Namespace, plan_dir: Path) -> int:
                 f"(state mutation still durable; re-run `bin/render_status_tree {args.slug}` to retry)",
                 file=sys.stderr,
             )
+
+    # fleet auto-integration (docs/FLEET.md): the task transition is durable
+    # at this point (render failures above never roll it back). Silent no-op
+    # unless the adopter project ran `bin/fleet init`; never raises.
+    fleet_auto.code_task_updated(args.slug, args.task_id, target_status)
 
     if render_failure_code is not None:
         return render_failure_code
@@ -706,6 +718,11 @@ def _dispatch_from_develop_plan(
                 f"(state mutation still durable; re-run `bin/render_status_tree {args.slug}` to retry)",
                 file=sys.stderr,
             )
+
+    # fleet auto-integration (docs/FLEET.md): the task transition is durable
+    # at this point (render failures above never roll it back). Silent no-op
+    # unless the adopter project ran `bin/fleet init`; never raises.
+    fleet_auto.code_task_updated(args.slug, args.task_id, target_status)
 
     if render_failure_code is not None:
         return render_failure_code

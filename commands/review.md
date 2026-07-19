@@ -69,6 +69,16 @@ Check via Bash before invoking.
 - Reviewer verdict logged under `verification/` per §A.impl.7.
 - Morning-review entry appended on halt verdicts.
 
+## Fleet auto-tracking (opt-in)
+
+No command-level calls needed: when the project has opted into the
+fleet lifecycle tracker (`docs/plans/_fleet/_fleet_meta.json`
+exists — see `docs/FLEET.md`), `bin/verify boundary` records
+`review` / `✈️ wip` on start, `🕛 ready` with the junction's next
+command on READY (`plan_to_implplan` → `/implplan`,
+`implplan_to_code` → `/code`), and `❌ blocked` on a HALT verdict
+engine-side. On a project that has not opted in this is a no-op.
+
 ## Cross-references
 
 - `bin/verify` — POSIX wrapper (`boundary` subcommand)
