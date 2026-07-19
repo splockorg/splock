@@ -12,8 +12,10 @@ Ports the behavioral guarantees of the qum reference implementation
 - `render --write` touches ONLY the marker zones (hand-authored
   narrative survives byte-identical) and refuses byte-untouched when
   markers are missing;
-- the CLI's opt-in gate (`update` refuses with exit 39 until
-  `bin/fleet init`).
+- the CLI's opt-in gate (`update` and BOTH render modes refuse with
+  exit 45 until `bin/fleet init` — a wrong-cwd render must never
+  silently claim an empty fleet; first-field-deployment defect,
+  2026-07-19).
 
 Run from the splock repo root with the project venv active.
 """
@@ -214,8 +216,27 @@ def test_render_write_refuses_when_markers_missing(fleet_project, capsys):
     assert err["error"] == "hub_markers_missing"
 
 
-def test_render_print_needs_no_init(project, capsys):
-    # plain render (no --write) is read-only and works pre-init
+def test_render_refuses_uninitialized_in_both_modes(project, monkeypatch,
+                                                    capsys):
+    """Wrong-cwd render must refuse loudly, never claim an empty fleet.
+
+    Field defect (first deployment, 2026-07-19): print-mode render from
+    a non-fleet directory exited 0 with '_Nothing active…_' zones —
+    silent success with wrong data. Both modes now share `spawn`'s
+    refuse-cleanly posture, and the error names the invoking dir so the
+    operator sees WHERE the lookup started.
+    """
+    monkeypatch.setenv("SPLOCK_CALLER_PWD", "/definitely/not/a/fleet/repo")
+    for argv in (["render"], ["render", "--write"]):
+        rc = fleet_main(argv)
+        assert rc == exit_codes.EXIT_FLEET_NOT_INITIALIZED
+        captured = capsys.readouterr()
+        assert "Nothing active" not in captured.out  # no empty-universe zones
+        err = json.loads(captured.err.strip().splitlines()[-1])
+        assert err["error"] == "fleet_not_initialized"
+        assert "/definitely/not/a/fleet/repo" in err["detail"]
+
+
+def test_render_print_works_once_initialized(fleet_project, capsys):
     assert fleet_main(["render"]) == exit_codes.EXIT_OK
-    out = capsys.readouterr().out
-    assert "===== now =====" in out
+    assert "===== now =====" in capsys.readouterr().out

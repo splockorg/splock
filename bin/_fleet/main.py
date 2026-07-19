@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from bin._fleet import auto, engine, exit_codes, hub, paths
@@ -37,13 +38,19 @@ def _emit_stderr_json(payload: dict) -> None:
 def _require_initialized(subcommand: str) -> bool:
     if paths.enabled():
         return True
+    # Name the invoking directory: the classic failure is running from a
+    # non-fleet cwd, where a silent empty answer would be wrong data
+    # (first field deployment, 2026-07-19). SPLOCK_CALLER_PWD is the
+    # pre-cd invoking dir the bin/fleet wrapper preserves.
+    caller = os.environ.get("SPLOCK_CALLER_PWD") or os.getcwd()
     _emit_stderr_json({
         "error": "fleet_not_initialized",
         "subcommand": subcommand,
         "detail": (
-            f"fleet is opt-in per project and {paths.meta_path()} does not "
-            f"exist. Run `bin/fleet init` (or `bin/fleet init --hub "
-            f"<existing .md>`) first."
+            f"no fleet meta found from {caller}: fleet is opt-in per "
+            f"project and {paths.meta_path()} does not exist. Run "
+            f"`bin/fleet init` (or `bin/fleet init --hub <existing .md>`) "
+            f"in the adopter repo first."
         ),
     })
     return False
@@ -178,12 +185,19 @@ def _render_write() -> int:
 
 
 def _cmd_render(args: argparse.Namespace) -> int:
+    # BOTH modes require initialization. Print mode used to run
+    # uninitialized "for convenience" — field-falsified on the first
+    # deployment (qum, 2026-07-19): from a wrong cwd it rendered an
+    # EMPTY universe with exit 0, so a scripted parity check would
+    # conclude the fleet is empty instead of being told "not a fleet
+    # repo". Silent success with wrong data is the exact failure class
+    # `spawn`'s guard already refuses; render now matches it.
+    if not _require_initialized("render --write" if args.write else "render"):
+        return exit_codes.EXIT_FLEET_NOT_INITIALIZED
     if not args.write:
         for zone, body in engine.render_zones().items():
             print(f"\n===== {zone} =====\n{body}")
         return exit_codes.EXIT_OK
-    if not _require_initialized("render --write"):
-        return exit_codes.EXIT_FLEET_NOT_INITIALIZED
     return _render_write()
 
 
