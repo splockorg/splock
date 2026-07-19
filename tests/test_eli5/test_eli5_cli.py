@@ -207,6 +207,62 @@ def test_sdk_failure_exits_17(subject_file, monkeypatch, capsys) -> None:
 
 
 # ---------------------------------------------------------------------------
+# caller-relative path resolution (field defect, 2026-07-19)
+# ---------------------------------------------------------------------------
+#
+# The bin/eli5 wrapper cd's into the checkout root before exec and exports
+# SPLOCK_CALLER_PWD to preserve the invoking dir — but main.py originally
+# resolved relative --subject-file/--out raw against the post-cd cwd: a
+# relative subject exit-49'd on an existing file, and a relative --out would
+# have written the briefing INTO the splock checkout.
+
+
+def test_relative_paths_resolve_against_caller_pwd(tmp_path, monkeypatch,
+                                                   capsys) -> None:
+    caller = tmp_path / "adopter_repo"
+    (caller / "docs").mkdir(parents=True)
+    (caller / "docs" / "subject.md").write_text("dense findings\n",
+                                               encoding="utf-8")
+    monkeypatch.setenv("SPLOCK_CALLER_PWD", str(caller))
+    monkeypatch.chdir(tmp_path)  # ≠ caller, mimicking the wrapper's cd
+
+    monkeypatch.setattr(main_mod, "invoke_eli5",
+                        lambda *a, **k: _stub_result(DECISION_BRIEFING))
+    rc = eli5_main(["--subject-file", "docs/subject.md",
+                    "--out", "briefing.md", "--prompt-file"])
+    assert rc == exit_codes.EXIT_OK
+    # both artifacts land under the CALLER's dir, not the process cwd
+    assert (caller / "briefing.md").is_file()
+    assert (caller / "briefing_prompt.txt").is_file()
+    assert not (tmp_path / "briefing.md").exists()
+
+
+def test_relative_next_prompt_path_resolves_against_caller_pwd(
+        tmp_path, monkeypatch, capsys) -> None:
+    caller = tmp_path / "adopter_repo"
+    slug_dir = caller / "docs" / "plans" / "s1"
+    slug_dir.mkdir(parents=True)
+    (slug_dir / "_eli5_prompt_2.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setenv("SPLOCK_CALLER_PWD", str(caller))
+    monkeypatch.chdir(tmp_path)
+    assert eli5_main(["--next-prompt-path", "docs/plans/s1"]) == exit_codes.EXIT_OK
+    out = capsys.readouterr().out.strip()
+    assert out == str(slug_dir / "_eli5_prompt_3.txt")
+
+
+def test_relative_subject_error_names_the_resolved_path(tmp_path, monkeypatch,
+                                                        capsys) -> None:
+    caller = tmp_path / "adopter_repo"
+    caller.mkdir()
+    monkeypatch.setenv("SPLOCK_CALLER_PWD", str(caller))
+    monkeypatch.chdir(tmp_path)
+    rc = eli5_main(["--subject-file", "missing.md"])
+    assert rc == exit_codes.EXIT_SUBJECT_UNREADABLE
+    err = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
+    assert str(caller / "missing.md") in err["detail"]  # resolved, not raw
+
+
+# ---------------------------------------------------------------------------
 # invoke-level prompt assembly (fake streaming client)
 # ---------------------------------------------------------------------------
 

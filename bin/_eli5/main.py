@@ -88,6 +88,24 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _resolve_caller_path(raw: str) -> Path:
+    """Resolve an operator-supplied path against the INVOKING directory.
+
+    The `bin/eli5` wrapper `cd`s into the plugin/checkout root before
+    exec (and exports `SPLOCK_CALLER_PWD` precisely to preserve the
+    invoking dir) — so a raw relative path here would resolve against
+    the splock checkout, not where the operator ran the command. Field
+    defect (qum burn-in closeout, 2026-07-19, filed on the PR): a
+    relative `--subject-file` exit-49'd on a file that existed, and a
+    relative `--out` would have written the briefing INTO the checkout.
+    """
+    p = Path(raw)
+    if p.is_absolute():
+        return p
+    caller = os.environ.get("SPLOCK_CALLER_PWD")
+    return (Path(caller) / p) if caller else p
+
+
 def _atomic_write(target: Path, text: str) -> None:
     tmp = Path(f"{target}.{os.getpid()}.tmp")
     tmp.write_text(text, encoding="utf-8")
@@ -111,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(build_format(args.print_format))
         return exit_codes.EXIT_OK
     if args.next_prompt_dir is not None:
-        target = Path(args.next_prompt_dir)
+        target = _resolve_caller_path(args.next_prompt_dir)
         if not target.is_dir():
             _emit_stderr_json({"error": "usage",
                                "detail": f"not a directory: {target}"})
@@ -138,15 +156,16 @@ def main(argv: list[str] | None = None) -> int:
         })
         return exit_codes.EXIT_USAGE
 
+    subject_path = _resolve_caller_path(args.subject_file)
     try:
-        subject_raw = Path(args.subject_file).read_text(encoding="utf-8")
+        subject_raw = subject_path.read_text(encoding="utf-8")
     except OSError as exc:
         _emit_stderr_json({"error": "subject_unreadable",
-                           "detail": f"{args.subject_file}: {exc}"})
+                           "detail": f"{subject_path}: {exc}"})
         return exit_codes.EXIT_SUBJECT_UNREADABLE
     if not subject_raw.strip():
         _emit_stderr_json({"error": "subject_unreadable",
-                           "detail": f"{args.subject_file}: empty subject"})
+                           "detail": f"{subject_path}: empty subject"})
         return exit_codes.EXIT_SUBJECT_UNREADABLE
 
     subject_md, omitted = truncate_subject(subject_raw)
@@ -167,14 +186,15 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.out:
-            _atomic_write(Path(args.out), briefing)
-            print(f"wrote {args.out}", file=sys.stderr)
+            out_path = _resolve_caller_path(args.out)
+            _atomic_write(out_path, briefing)
+            print(f"wrote {out_path}", file=sys.stderr)
         if args.prompt_file:
             decisions = count_decision_items(briefing)
             if decisions == 0:
                 print("no decisions — nothing to sheet", file=sys.stderr)
             else:
-                sheet = _sheet_path_for(Path(args.out))
+                sheet = _sheet_path_for(_resolve_caller_path(args.out))
                 _atomic_write(sheet, build_prompt_sheet(briefing))
                 print(f"wrote decision sheet ({decisions} decisions) → {sheet}",
                       file=sys.stderr)
