@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "Self-hosted Claude Code marketplace for the splock framework (single plugin = this repo).",
-    "version": "0.2.0"
+    "version": "0.2.1"
   },
   "plugins": [
     {
       "name": "splock",
       "source": "./",
       "description": "Governed plan -> implement -> verify lifecycle framework with a deterministic enforcement spine. Anthropic-native.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "license": "Apache-2.0"
     }
   ]
