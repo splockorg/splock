@@ -168,6 +168,14 @@ def spawn(
             f"slug dir does not exist: {paths.slug_dir(slug)} — mkdir it first"
         )
     meta = engine.load_meta()
+    if not resume_session and stage in engine.unspawnable_stages(meta):
+        # E3 (field, 2026-07-19/20): attended-only stages refuse OUTRIGHT —
+        # the prior "safety" was an accident (no stage profile → deny-writes
+        # no-op child). Applies to dry-run too: policy, not mechanics.
+        raise SpawnRefused(
+            f"stage '{stage}' is attended-only (meta unspawnable_stages) — "
+            f"run `/splock:{stage} {slug}` in an attended session instead"
+        )
     profile = resolve_profile(meta, stage, overrides)
 
     if resume_session:

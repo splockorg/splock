@@ -40,6 +40,11 @@ EXIT_SPAWN_REFUSED = 47
 cap is reached (all children draw one subscription pool), the slug dir
 is missing, or the `claude` CLI is not on PATH."""
 
+EXIT_CLOSE_REFUSED = 50
+"""`close` refused before any mutation: unknown slug, already archived,
+successor already exists, or an incomplete successor spec. (49 is
+`bin/_eli5`-owned; 50 is the next free slot of the full registry.)"""
+
 EXIT_NO_SESSION = 48
 """`resume` found no session handle in the slug's `_fleet_runs.jsonl`
 ledger (nothing was ever spawned/completed for it, or the ledger rows

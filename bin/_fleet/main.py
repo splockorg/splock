@@ -9,6 +9,9 @@ Subcommands:
   init    [--hub <existing .md>]
   seed    --from <seed.json> [--force] [--events]
   migrate [--<zone>-start S --<zone>-end E]... [--dry-run]
+  close   <slug> [--note N] [--no-archive]
+          [--successor <slug> --piece P --wave W --next N
+           [--successor-directive D]]
   stage   (start|finish) <slug> --stage S [--status S] [--next N]
           [--actor A] [--note N]
   spawn   <slug> --stage S [--model M] [--effort E]
@@ -44,6 +47,7 @@ import sys
 
 from bin import _env_paths
 from bin._fleet import auto, board as board_mod, engine, exit_codes, hub, paths
+from bin._fleet import close as close_mod
 from bin._fleet import runs as runs_mod
 from bin._fleet import seed as seed_mod
 from bin._fleet import spawn as spawn_mod
@@ -137,6 +141,35 @@ def build_parser() -> argparse.ArgumentParser:
         m.add_argument(f"--{zone}-end", dest=f"{zone}_end", default=None,
                        help=f"end anchor for the {zone} zone (kept verbatim)")
     m.add_argument("--dry-run", action="store_true")
+
+    cl = sub.add_parser(
+        "close",
+        help="atomic terminal transition: final event + archive + meta "
+             "reconcile [+ successor mint] + one render",
+        allow_abbrev=False,
+    )
+    cl.add_argument("slug")
+    cl.add_argument("--note", default=None,
+                    help="dated closeout note (lands in the final event and "
+                         "the meta closed[] row)")
+    cl.add_argument("--no-archive", dest="no_archive", action="store_true",
+                    help="flip status + reconcile meta but leave the dir "
+                         "live (closed-but-delivered); re-run close later "
+                         "to complete the archive")
+    cl.add_argument("--successor", default=None,
+                    help="mint a successor slug (one shot; requires --piece, "
+                         "--wave, --next)")
+    cl.add_argument("--piece", default=None,
+                    help="successor roster piece description")
+    cl.add_argument("--wave", type=int, default=None,
+                    help="successor wave number")
+    cl.add_argument("--next", dest="successor_next", default=None,
+                    help='successor next action — a bare stage token '
+                         '("/recon") makes the PROMPTS zone offer its spawn '
+                         'line')
+    cl.add_argument("--successor-directive", dest="successor_directive",
+                    default=None,
+                    help="stored spawn directive for the successor")
 
     st = sub.add_parser(
         "stage",
@@ -482,7 +515,36 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     return exit_codes.EXIT_OK
 
 
+def _cmd_close(args: argparse.Namespace) -> int:
+    if not _require_initialized("close"):
+        return exit_codes.EXIT_FLEET_NOT_INITIALIZED
+    try:
+        message = close_mod.close(
+            args.slug,
+            note=args.note,
+            no_archive=args.no_archive,
+            successor=args.successor,
+            successor_piece=args.piece,
+            successor_wave=args.wave,
+            successor_next=args.successor_next,
+            successor_directive=args.successor_directive,
+        )
+    except close_mod.CloseRefused as exc:
+        _emit_stderr_json({"error": "close_refused", "detail": str(exc)})
+        return exit_codes.EXIT_CLOSE_REFUSED
+    except engine.HubMarkersMissing as exc:
+        # State/meta/archive already landed; only the render failed.
+        _emit_stderr_json({"error": "hub_markers_missing", "detail": str(exc)})
+        return exit_codes.EXIT_HUB_ANCHOR_MISSING
+    except OSError as exc:
+        _emit_stderr_json({"error": "atomic_write_failed", "detail": str(exc)})
+        return exit_codes.EXIT_ATOMIC_WRITE_FAILED
+    print(f"fleet: {message}")
+    return exit_codes.EXIT_OK
+
+
 _DISPATCH = {
+    "close": _cmd_close,
     "update": _cmd_update,
     "render": _cmd_render,
     "state": _cmd_state,
