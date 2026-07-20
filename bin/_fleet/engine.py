@@ -48,14 +48,19 @@ STATUS_ORDER = {"wip": 0, "ready": 1, "blocked": 2, "done": 3, "parked": 4, "clo
 MARKERS = {  # zone → (begin, end)
     "now": ("<!-- FLEET:NOW:BEGIN -->", "<!-- FLEET:NOW:END -->"),
     "prompts": ("<!-- FLEET:PROMPTS:BEGIN -->", "<!-- FLEET:PROMPTS:END -->"),
+    "tree": ("<!-- FLEET:TREE:BEGIN -->", "<!-- FLEET:TREE:END -->"),
+    "attended": ("<!-- FLEET:ATTENDED:BEGIN -->", "<!-- FLEET:ATTENDED:END -->"),
     "board": ("<!-- FLEET:BOARD:BEGIN -->", "<!-- FLEET:BOARD:END -->"),
     "recent": ("<!-- FLEET:RECENT:BEGIN -->", "<!-- FLEET:RECENT:END -->"),
 }
 
-#: Zones a hub may lack without failing `render --write`: pre-PROMPTS
-#: hubs keep working unchanged until `bin/fleet migrate` wires the new
-#: markers in. The original three zones stay mandatory.
-OPTIONAL_ZONES = ("prompts",)
+#: Zones a hub may lack without failing `render --write`: hubs wired
+#: before a zone existed keep working unchanged until `bin/fleet
+#: migrate` wires the new markers in (the PROMPTS upgrade precedent;
+#: TREE/ATTENDED joined 2026-07-20 — every hand-authored copy of
+#: derived hub state rotted twice in one field week). The original
+#: three zones stay mandatory.
+OPTIONAL_ZONES = ("prompts", "tree", "attended")
 
 # Keeps every event line comfortably under PIPE_BUF (4096 bytes) so the
 # single O_APPEND write stays atomic on a local FS even with maximal
@@ -244,8 +249,14 @@ def render_board(states: dict[str, dict], meta: dict) -> str:
             f"| `{slug}` | {piece} | {st.get('stage','—')} | {st.get('next','—')} "
             f"| {glyph} {label} | {st.get('blockers','') or '—'} |"
         )
-    # closed/archived slugs are static (never change) — rendered from meta, not per-slug files
+    # closed/archived slugs are static (never change) — rendered from meta, not
+    # per-slug files. Skip any whose slug still has a LIVE state: `fleet close
+    # --no-archive` reconciles the meta while the dir stays live (the observed
+    # closed-but-delivered half-state), and the live row must win — one row per
+    # slug, never two.
     for c in meta.get("closed", []):
+        if c.get("slug") in states:
+            continue
         rows.append(
             f"| `{c['slug']}` | {c.get('piece','—')} | — | — | ✅ closed "
             f"| {c.get('note','') or '—'} |"
@@ -288,6 +299,24 @@ def _directive_display(state: dict) -> str | None:
     return text
 
 
+def unspawnable_stages(meta: dict) -> set[str]:
+    """The attended-only stage deny-list (meta `unspawnable_stages`).
+
+    One field drives BOTH enforcement points (field lesson, 2026-07-19/20):
+    `spawn` refuses outright, and the PROMPTS zone never renders a
+    runnable line for these stages — those slugs render under the
+    ATTENDED zone instead. The prior safety was an accident (a missing
+    stage profile falling through to deny-writes).
+    """
+    return set(meta.get("unspawnable_stages") or [])
+
+
+def next_stage_token(state: dict) -> str | None:
+    """The bare stage token in `next` (`/qa` → `qa`), else None."""
+    m = _SPAWNABLE_NEXT.match((state.get("next") or "").strip())
+    return m.group(1) if m else None
+
+
 def render_prompts(states: dict[str, dict], meta: dict) -> str:
     """The generated prompt bay: per-slug next actions as runnable
     `bin/fleet spawn` one-liners.
@@ -309,7 +338,10 @@ def render_prompts(states: dict[str, dict], meta: dict) -> str:
         d = _directive_display(state)
         return [f"  - directive: {d}"] if d else []
 
-    ready = sorted((s for s, st in states.items() if st.get("status") == "ready"),
+    deny = unspawnable_stages(meta)
+    ready = sorted((s for s, st in states.items()
+                    if st.get("status") == "ready"
+                    and next_stage_token(st) not in deny),
                    key=wave_key)
     held = sorted((s for s, st in states.items()
                    if st.get("status") in ("blocked", "parked")),
@@ -345,6 +377,108 @@ def render_prompts(states: dict[str, dict], meta: dict) -> str:
     return "\n".join(lines)
 
 
+def render_tree(states: dict[str, dict], meta: dict) -> str:
+    """The generated execution tree — the hand-authored layer that rotted.
+
+    Derived per wave (meta `waves` + roster wave assignments) from
+    fields that already exist: status glyph, stage → next, piece. Closed
+    slugs render collapsed with their closed date (waved entries under
+    their wave; legacy entries without a wave in a trailing group). No
+    new authoring surface — flavor a human wants to keep is what
+    `--note` already is.
+    """
+    roster = meta.get("roster", {})
+    closed = meta.get("closed", [])
+    closed_by_slug = {c.get("slug"): c for c in closed if c.get("slug")}
+
+    def live_line(slug: str) -> str:
+        st = states.get(slug)
+        if st is None:
+            return f"- ⏳ `{slug}` — (no state yet)"
+        piece = roster.get(slug, {}).get("piece", st.get("piece") or "—")
+        return (f"- {GLYPH.get(st.get('status'), '?')} `{slug}` — "
+                f"{st.get('stage', '—')} → {st.get('next', '—')} · {piece}")
+
+    def closed_line(entry: dict) -> str:
+        date = entry.get("closed") or ""
+        suffix = f" — closed {date}" if date else f" — {entry.get('note') or 'closed'}"
+        return f"- ✅ `{entry['slug']}`{suffix}"
+
+    lines: list[str] = []
+
+    def emit_group(title: str, body: list[str]) -> None:
+        if body:
+            if lines:
+                lines.append("")
+            lines.extend([f"**{title}**", ""] + body)
+
+    seen: set[str] = set()
+    for wave in meta.get("waves", []):
+        wid = wave.get("id")
+        body: list[str] = []
+        for slug in sorted(s for s, r in roster.items() if r.get("wave") == wid):
+            seen.add(slug)
+            body.append(live_line(slug))
+        for entry in closed:
+            if entry.get("wave") == wid and entry["slug"] not in seen:
+                seen.add(entry["slug"])
+                body.append(closed_line(entry))
+        emit_group(f"Wave {wid} — {wave.get('title', '')}".rstrip(" —"), body)
+
+    unwaved = sorted((set(roster) | set(states)) - seen)
+    emit_group("Unwaved", [live_line(s) for s in unwaved if s not in closed_by_slug])
+    seen.update(unwaved)
+
+    legacy_closed = [c for c in closed if c.get("slug") not in seen]
+    emit_group("Closed", [closed_line(c) for c in legacy_closed])
+
+    return "\n".join(lines) if lines else "_No waves, roster, or state yet._"
+
+
+def render_attended(states: dict[str, dict], meta: dict) -> str:
+    """The generated attended queue — ready slugs whose next stage is
+    attended-only (meta `unspawnable_stages`).
+
+    These never render as runnable spawn lines (the PROMPTS zone skips
+    them); here they get the attended session gesture instead, plus the
+    optional operator-set `roster.<slug>.attended` config block
+    ({slot, model, effort, ultracode} — render what's present, require
+    nothing). Full routing-derived assignment is future work (E2) — the
+    config block is the seam it will fill.
+    """
+    deny = unspawnable_stages(meta)
+    roster = meta.get("roster", {})
+    queue = [(s, st, next_stage_token(st)) for s, st in states.items()
+             if st.get("status") == "ready" and next_stage_token(st) in deny]
+    if not queue:
+        return ("_Nothing queued for attended work._"
+                if deny else
+                "_No attended-only stages declared (meta `unspawnable_stages`)._")
+
+    def sort_key(item):
+        slug, _, _ = item
+        att = roster.get(slug, {}).get("attended", {})
+        slot = att.get("slot")
+        return (slot is None, slot if slot is not None else 0,
+                roster.get(slug, {}).get("wave", 99), slug)
+
+    lines = ["**Run attended — one session per slug; never spawned headless.**",
+             ""]
+    for slug, st, stage in sorted(queue, key=sort_key):
+        lines.append(f"- `/splock:{stage} {slug}` — "
+                     f"{GLYPH.get(st.get('status'), '?')} {st.get('stage', '—')} "
+                     f"→ {st.get('next', '—')}")
+        att = roster.get(slug, {}).get("attended", {})
+        cfg = " · ".join(f"{k}: {att[k]}" for k in ("slot", "model", "effort", "ultracode")
+                         if k in att)
+        if cfg:
+            lines.append(f"  - {cfg}")
+        d = _directive_display(st)
+        if d:
+            lines.append(f"  - directive: {d}")
+    return "\n".join(lines)
+
+
 def render_recent(events: list[dict], n: int = 8) -> str:
     if not events:
         return "_No events logged yet._"
@@ -360,17 +494,26 @@ def render_recent(events: list[dict], n: int = 8) -> str:
     return "\n".join(rows)
 
 
-def render_zones() -> dict[str, str]:
-    """Fold every per-slug file into the zone bodies."""
+def _zone_bodies() -> tuple[dict[str, str], dict[str, dict], list[dict]]:
+    """One fold for every zone body (shared by print + write paths)."""
     states = load_all_states()
     events = load_all_events()
     meta = load_meta()
-    return {
+    zones = {
         "now": render_now(states, meta),
         "prompts": render_prompts(states, meta),
+        "tree": render_tree(states, meta),
+        "attended": render_attended(states, meta),
         "board": render_board(states, meta),
         "recent": render_recent(events),
     }
+    return zones, states, events
+
+
+def render_zones() -> dict[str, str]:
+    """Fold every per-slug file into the zone bodies."""
+    zones, _, _ = _zone_bodies()
+    return zones
 
 
 def _replace_zone(text: str, zone: str, body: str) -> str:
@@ -391,16 +534,8 @@ def render_hub_write() -> tuple[int, int]:
     Raises HubMarkersMissing before any write when a zone's markers are
     absent — the hub is left byte-identical.
     """
-    states = load_all_states()
-    events = load_all_events()
-    meta = load_meta()
-    zones = {
-        "now": render_now(states, meta),
-        "prompts": render_prompts(states, meta),
-        "board": render_board(states, meta),
-        "recent": render_recent(events),
-    }
-    hub = paths.hub_path(meta)
+    zones, states, events = _zone_bodies()
+    hub = paths.hub_path(load_meta())
     with open(hub, encoding="utf-8") as f:
         text = f.read()
     for z, body in zones.items():

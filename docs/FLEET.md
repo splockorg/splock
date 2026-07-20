@@ -254,11 +254,48 @@ re-verify before relying on version-sensitive behavior):
 - The `ultracode` keyword does **not** activate in `-p` children (no
   system reminder observed) — do not rely on it in child prompts.
 
+## Closeout + the fully generated hub (`close`, TREE, ATTENDED)
+
+Field lesson (two hub-rot incidents in one week): **state is never
+hand-authored** — narrative/charter prose stays human; every layer
+derivable from per-slug state is a generated zone; terminal transitions
+propagate everywhere atomically.
+
+**`bin/fleet close <slug>`** owns the whole terminal transition in one
+verb: final `closed` event + state flip → meta reconcile (roster →
+dated, waved `closed[]` row; `close` is the one verb besides
+`init`/`migrate` that writes the meta) → archive to
+`docs/plans/_closed/<slug>/` (`git mv` in a repo, plain move otherwise;
+`--no-archive` defers the move for the closed-but-delivered half-state,
+and a second `close` completes it) → optional one-shot successor mint
+(`--successor <slug> --piece … --wave N --next "/<stage>"
+[--successor-directive …]` — roster row, slug dir, seed/ready state, so
+the PROMPTS zone offers its spawn line immediately) → ONE
+`render --write`. Every refusal (unknown slug, already archived,
+successor exists, partial successor spec) fires before any mutation
+(exit 50).
+
+**Two more generated zones** (same marker mechanism; `bin/fleet
+migrate` upgrades wired hubs by adding only the missing zones):
+
+- `FLEET:TREE` — the execution tree, derived per wave from roster +
+  live state; closed slugs render collapsed with their closed date.
+- `FLEET:ATTENDED` — the attended queue: ready slugs whose next stage
+  is in the meta `unspawnable_stages` deny-list render here as
+  attended-session gestures (`/splock:<stage> <slug>`), never as spawn
+  lines. Optional per-slug `roster.<slug>.attended {slot, model,
+  effort, ultracode}` renders when present (the seam a future
+  routing advisor fills). The SAME deny-list makes `bin/fleet spawn`
+  refuse outright (exit 47) — attended-only is policy, not a
+  profile-absence accident.
+
 ## Files
 
 - `bin/fleet` — POSIX wrapper → `python -m bin._fleet.main`.
 - `bin/_fleet/engine.py` — per-slug IO + the pure render projection.
-- `bin/_fleet/hub.py` — `init` + `migrate` (anchor-verified swap).
+- `bin/_fleet/hub.py` — `init` + `migrate` (anchor-verified swap;
+  upgrades wired hubs with missing zones).
+- `bin/_fleet/close.py` — the atomic terminal transition (`fleet close`).
 - `bin/_fleet/seed.py` — one-time state seeding from operator JSON.
 - `bin/_fleet/auto.py` — the engine-side stage hooks + the canonical
   stage → next-command map.

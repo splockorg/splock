@@ -87,6 +87,8 @@ SECTION_MARKER = "<!-- FLEET:SECTION -->"
 _ZONE_HEADINGS = {
     "now": "### ▶ Now — actionable slugs",
     "prompts": "### 🎛 Prompt bay — next actions",
+    "tree": "### 🌳 Execution tree",
+    "attended": "### ⏸ Attended queue",
     "board": "### 📋 Status board",
     "recent": "### 🕘 Recent events",
 }
@@ -140,7 +142,11 @@ _META_COMMENT = (
     "fleet cross-slug structure (rarely changes; single author). Per-slug "
     "DYNAMIC state lives in docs/plans/<slug>/_fleet.json; history in "
     "docs/plans/<slug>/_fleet_log.jsonl. The hub .md FLEET:* zones are "
-    "DERIVED from these by `bin/fleet render --write`."
+    "DERIVED from these by `bin/fleet render --write`. This meta is written "
+    "ONLY by `bin/fleet init`, `migrate`, and `close` (the terminal-"
+    "transition verb: roster -> closed[], successor mint); hand edits are "
+    "for the operator-owned knobs (roster/waves/profiles/unspawnable_stages/"
+    "attended blocks)."
 )
 
 
@@ -207,6 +213,11 @@ def init(hub: str | None = None) -> tuple[bool, Path]:
         # "/splock:<stage>" is the installed-plugin spelling — drop the
         # "splock:" prefix for sideloaded/in-tree checkouts.
         "command_template": "/splock:{stage} {slug}",
+        # Attended-only stages: `spawn` refuses outright and the PROMPTS
+        # zone never renders a runnable line — those slugs queue under
+        # the generated ATTENDED zone instead (optional per-slug
+        # roster.<slug>.attended {slot, model, effort, ultracode} block).
+        "unspawnable_stages": [],
     }
     engine.save_meta(meta)
 
