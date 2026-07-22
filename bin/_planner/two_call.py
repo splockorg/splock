@@ -8,6 +8,16 @@ phase. Single-turn dual emission is impossible by construction — the
 SDK API surface does not expose a "reason then emit" affordance; each
 call is a separate HTTP round-trip with its own `output_config.format`.
 
+Transport / billing — read before concluding the planner "can't run":
+these two `messages.create(...)` calls default to the subscription
+transport `bin._sdk_bridge.SubscriptionClient` (see `_default_client`),
+which bills the operator's Claude Code subscription via the local `claude`
+CLI and needs NO `ANTHROPIC_API_KEY`. "Separate HTTP round-trip" does not
+imply a metered API key — a missing `ANTHROPIC_API_KEY` is the correct
+state, not a failure. Do not read the metered-client references below (the
+`AnthropicClient` protocol, `anthropic 0.104.0`) as a live requirement:
+they describe the legacy path that `_default_client` no longer takes.
+
 Call 1 (Reasoning):
 - NO `output_config`.
 - Free-form MD scratchpad; reasoning quality preserved.
