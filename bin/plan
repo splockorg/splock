@@ -30,4 +30,10 @@ if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV" ]; then
   source "$VENV"
 fi
 
+# Informational banner (stderr): the planner bills the Claude Code
+# subscription via the claude_agent_sdk transport (bin/_sdk_bridge.py); it
+# does NOT read ANTHROPIC_API_KEY. A missing key is expected, not an error —
+# do not refuse to run on its account. See commands/plan.md "Auth & billing".
+echo "splock: planner uses the Claude Code subscription transport (no ANTHROPIC_API_KEY required)" >&2
+
 exec "$(command -v python || command -v python3)" -m bin._planner.main plan "$@"
