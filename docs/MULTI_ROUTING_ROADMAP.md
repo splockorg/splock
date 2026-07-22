@@ -78,7 +78,9 @@ Key caveats:
   schema** [19] and unconfirmed official-distribution/billing model.
 - **`agy` headless mode is verified from the installed binary** (`agy --help`,
   v1.1.2, 2026-07-22) — this overrides the earlier web-research claim that
-  Antigravity had no scriptable surface. [20]
+  Antigravity had no scriptable surface. **Execution smoke-tested 2026-07-22:**
+  `agy -p "…" ` returned a completion, exit 0 — auth is live. Billing is not
+  surfaced in CLI output (dashboard/log check still open). [20]
 
 ---
 
@@ -100,10 +102,50 @@ governance decision, not a default.
 
 ---
 
+## Reconciliations vs. prior design docs (verified 2026-07-22)
+
+This roadmap post-dates `PORTABILITY_REVIEW.md` / recon / qna (2026-07-15/16) by
+a week, and the repo moved under them (fleet + eli5 landed 07-18). Where they
+conflict, the authority is: **external CLI/provider facts → this session's
+ground-truth + primary sources** (the docs are self-flagged docs-derived, recon
+G1); **splock internal state → the live repo code** (docs are stale where code
+moved); **architecture/design → the prior docs stand** (validated, not
+overturned). Five corrections the plan must carry:
+
+1. **Gemini cannot do constrained emission on the subscription CLI.**
+   `PORTABILITY_REVIEW.md:79` and the recon's `sanitize_schema` assume an
+   `AntigravityTransport` serves schema-bound roles via Gemini `responseSchema`.
+   `responseSchema` lives in the **metered Gemini API**, not `agy`/Gemini-CLI —
+   the CLIs have no schema flag [19]. Under splock's subscription-only policy the
+   planner (Call 2) therefore **cannot** route to Gemini. The role map above is
+   the corrected design; the recon's Gemini-schema assumption is superseded.
+2. **Every non-Claude transport wraps the CLI, never the metered SDK.** The recon
+   treats "SDK or `codex exec`/CLI" as interchangeable, but `_force_subscription_
+   auth` strips metered keys and the Antigravity SDK is API-key-only. So Tier-A
+   transports MUST wrap `codex exec` / `agy -p` to keep subscription billing —
+   the same hard constraint `bin/_fleet/spawn.py:104` already encodes. This is a
+   requirement in the plan, not an option.
+3. **fleet is a fourth, un-audited transport.** The recon's coupling audit
+   (07-15) predates fleet (07-18) and lists only three transport seams; fleet's
+   `build_child_argv` (`["claude","-p",…]`, `spawn.py:104`) is a fourth. Phase 1
+   seam-hardening must add it to the inventory even though the fleet-spawn *port*
+   itself is Phase 5.
+4. **Roster is already `schema_version: 3` (eli5) → routing lands as v4, and the
+   role set is 10, not 5.** The qna proposed putting the `routing` mapping in
+   roster v3, but v3 was spent on `eli5` (07-18); it must be re-cut as **v4**.
+   The recon's `ModelRole` enum has 5 members (planner/qa/coder/reviewer/
+   verifier) but the live role set is 9 subagents + `eli5` (a 10th, model-pinned
+   `DEFAULT_ELI5_MODEL`) — routing's role vocabulary must cover all of them.
+5. **Phase-number mapping** (the prior docs and this roadmap both say "Phase 0"):
+   roadmap **P0** (prove transports — new) → **P1** = recon's "Phase 0" seam
+   hardening → **P2** = review's "Phase 1" Codex → **P3** = review's "Phase 2"
+   Antigravity.
+
 ## Phased roadmap
 
 Each phase lists **Goal → Steps → Exit criteria → Next**. Phases 0–4 deliver the
-Tier-A multi-routing vision. Phase 5 (Tier B) is optional/stretch.
+Tier-A multi-routing vision. Phase 5 (Tier B) is optional/stretch. See the
+phase-number mapping above — this roadmap's P1 is the prior docs' "Phase 0."
 
 ### Phase 0 — Prove the transports (cheap; no splock code changes)
 - **Goal:** empirically confirm what each installed CLI can actually do for
@@ -122,6 +164,30 @@ Tier-A multi-routing vision. Phase 5 (Tier B) is optional/stretch.
 - **Next:** if Codex emits valid schema → Phase 1 with confidence in the planner
   route; if not → planner stays Claude-only and Codex is a coder/reviewer
   transport.
+- **Results (2026-07-22) — PASSED:**
+  - `agy -p` executes (exit 0) on the installed Antigravity auth.
+  - `codex` CLI v0.145.0 installed from GitHub release (no npm/cargo here —
+    prebuilt `x86_64-unknown-linux-musl` binary to `~/.local/bin`).
+  - Codex runs on the **ChatGPT subscription** (`auth.json` `auth_mode: chatgpt`,
+    OAuth tokens, **no API key**) — model `gpt-5.6-sol`, `approval: never`,
+    `sandbox: read-only`. Subscription-billed structured output confirmed.
+  - **The decisive experiment PASSED end-to-end:** raw `plan_v1.schema.json` was
+    rejected by OpenAI's strict dialect (`'required' … must include every key in
+    properties. Missing 'non_goals'`); after the sanitize transform, GPT-5.6
+    emitted a plan substrate that **validates against the *original* strict
+    `plan_v1.schema.json`** (pattern slug, `phase`/`tier`/`kind` enums, `const`
+    version — all correct). → **Codex can serve the planner and other schema-bound
+    roles.**
+  - **Proven `sanitize_schema` transform** (the seam CodexTransport implements):
+    strip `$schema`/`$id`/`$comment`; recursively set `required` = all
+    properties + `additionalProperties:false`; `const`→`enum:[x]`; drop
+    `minLength`/`maxLength`/`pattern`/`minItems`/`maxItems`/`format`; **keep
+    `enum`**. Then validate the *output* against the original strict schema.
+  - **Operational gotchas for CodexTransport:** `codex exec` blocks unless given
+    `< /dev/null` (it reads stdin); use absolute `--output-schema`/`-o` paths and
+    `-C <dir>` + `--skip-git-repo-check`. The prior caveats still hold —
+    `--output-schema` is incompatible with `exec resume` and ignored when MCP is
+    active, so the planner call must be a fresh, MCP-free exec.
 
 ### Phase 1 — Seam hardening (`bin/_host/`, zero behavior change)
 - **Goal:** build the host-adapter interface designed in the recon, with Claude
@@ -131,7 +197,10 @@ Tier-A multi-routing vision. Phase 5 (Tier B) is optional/stretch.
   2. Family-keyed transport registry + `StaticRouter` (everything → `claude`).
   3. Thread `RouteQuery`/`RouteDecision` through the three Tier-A DI seams
      (`two_call.py`, `_qa/invoke.py`, retry-loop `iteration_loop.py`), defaulting
-     to `StaticRouter`.
+     to `StaticRouter`. **Add fleet's `build_child_argv` (`spawn.py:104`) to the
+     transport inventory** — it is a fourth `["claude","-p"]` seam the original
+     audit missed (reconciliation #3); its port is Phase 5, but it must be named
+     here so seam-hardening is complete.
   4. `bin/hook-entry` dispatcher + conformance suite (deny-parity on Claude).
 - **Exit criteria:** CI green, **zero behavior change on Claude**, routing seam
   exists but always picks `claude`.
@@ -141,7 +210,8 @@ Tier-A multi-routing vision. Phase 5 (Tier B) is optional/stretch.
 - **Goal:** a real splock run where an OpenAI model does part of the work.
 - **Steps:**
   1. Implement `ClaudeTransport` + `CodexTransport` against the `ModelTransport`
-     ABC (`complete` / `spawn_agent` / `sanitize_schema`), wrapping `codex exec`.
+     ABC (`complete` / `spawn_agent` / `sanitize_schema`), wrapping **`codex exec`
+     (the CLI, not the metered SDK — reconciliation #2)** for subscription auth.
   2. Add capability tags so the router filters on structured-output support.
   3. Route the cost/throughput roles (coder, recon) to Codex via a minimal
      `RuleRouter`; keep planner/qa/reviewer/verifier on Claude.
@@ -152,10 +222,14 @@ Tier-A multi-routing vision. Phase 5 (Tier B) is optional/stretch.
 ### Phase 3 — Gemini/Antigravity transport (Tier A, constrained)
 - **Goal:** three-family routing for Tier-A roles.
 - **Steps:**
-  1. Implement `AntigravityTransport` wrapping `agy -p` / `--conversation`.
-  2. Confirm `agy`'s auth/billing model fits splock's subscription-only policy.
+  1. Implement `AntigravityTransport` wrapping **`agy -p` / `--conversation` (the
+     CLI, not the API-key SDK — reconciliation #2)**; execution already
+     smoke-tested (2026-07-22).
+  2. Confirm `agy`'s auth/billing model fits splock's subscription-only policy
+     (the one open item — CLI output does not surface cost).
   3. Route prose-heavy roles (recon/research) to Gemini; **exclude planner**
-     (no schema). Capability filter enforces this automatically.
+     (no CLI schema support — reconciliation #1). Capability filter enforces this
+     automatically via `capabilities()` minus `structured-output`.
 - **Exit criteria:** a splock run touching all three families, each on a role it
   fits.
 - **Next:** harden the routing rules into config (Phase 4).
