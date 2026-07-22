@@ -164,6 +164,30 @@ phase-number mapping above — this roadmap's P1 is the prior docs' "Phase 0."
 - **Next:** if Codex emits valid schema → Phase 1 with confidence in the planner
   route; if not → planner stays Claude-only and Codex is a coder/reviewer
   transport.
+- **Results (2026-07-22) — PASSED:**
+  - `agy -p` executes (exit 0) on the installed Antigravity auth.
+  - `codex` CLI v0.145.0 installed from GitHub release (no npm/cargo here —
+    prebuilt `x86_64-unknown-linux-musl` binary to `~/.local/bin`).
+  - Codex runs on the **ChatGPT subscription** (`auth.json` `auth_mode: chatgpt`,
+    OAuth tokens, **no API key**) — model `gpt-5.6-sol`, `approval: never`,
+    `sandbox: read-only`. Subscription-billed structured output confirmed.
+  - **The decisive experiment PASSED end-to-end:** raw `plan_v1.schema.json` was
+    rejected by OpenAI's strict dialect (`'required' … must include every key in
+    properties. Missing 'non_goals'`); after the sanitize transform, GPT-5.6
+    emitted a plan substrate that **validates against the *original* strict
+    `plan_v1.schema.json`** (pattern slug, `phase`/`tier`/`kind` enums, `const`
+    version — all correct). → **Codex can serve the planner and other schema-bound
+    roles.**
+  - **Proven `sanitize_schema` transform** (the seam CodexTransport implements):
+    strip `$schema`/`$id`/`$comment`; recursively set `required` = all
+    properties + `additionalProperties:false`; `const`→`enum:[x]`; drop
+    `minLength`/`maxLength`/`pattern`/`minItems`/`maxItems`/`format`; **keep
+    `enum`**. Then validate the *output* against the original strict schema.
+  - **Operational gotchas for CodexTransport:** `codex exec` blocks unless given
+    `< /dev/null` (it reads stdin); use absolute `--output-schema`/`-o` paths and
+    `-C <dir>` + `--skip-git-repo-check`. The prior caveats still hold —
+    `--output-schema` is incompatible with `exec resume` and ignored when MCP is
+    active, so the planner call must be a fresh, MCP-free exec.
 
 ### Phase 1 — Seam hardening (`bin/_host/`, zero behavior change)
 - **Goal:** build the host-adapter interface designed in the recon, with Claude
