@@ -61,6 +61,31 @@ the symmetric per-op-kind VALUE-shape closure D, was added post-ship for STD.6):
      stay backstopped by post-apply re-validation. See `_require_value_shape` +
      `_REQUIRED_VALUE_FIELDS`.
 
+  E. **Allowlisted nested-scalar addressing (post-ship).** `scalar` was
+     plan-ROOT-only, and the `op_kind` enum is closed — so
+     `conceptual_architecture.overview`, the single `plan_v1` scalar that is
+     neither a root key nor a keyed-collection entry, was addressable by NO op.
+     An amend touching it had to edit out of band and NARRATE the delta in the
+     audit row's prose, which is the failure this substrate exists to prevent:
+     `ops` stops being a description of the diff. The worst part was the failure
+     mode, not the gap — a patch addressing `field:
+     "conceptual_architecture.overview"` VALIDATES against `plan_patch_v1` (the
+     schema types `field` as a plain string) and then dies at apply-time saying
+     the field "is not present on the prior plan root", which describes the
+     symptom and hides the cause. `scalar` now accepts a dotted `field` drawn
+     from a CLOSED allowlist (`NESTED_SCALAR_FIELDS`), a dotted-but-unallowlisted
+     field fails naming the cause, and nested addressing is REPLACE-ONLY (every
+     allowlisted nested scalar is `plan_v1`-required, so add always collides and
+     remove can only reach exit 43 — both refused pre-apply). The allowlist is
+     closed rather than a general dotted-path resolver on purpose: a general
+     resolver would reach into keyed collections by path and bypass keyed
+     addressing, the reference tuple-uniqueness guard, and the op-bounding
+     denominator — the smuggling surface A exists to close. Nested scalars
+     inherit `scalar`'s exclusion from A's bound gate; that is a decision with
+     its reasoning recorded at `_KEYED_OP_KINDS` and pinned by a test, not an
+     inherited default. Surfaced by the first cross-repo `--amend` run (qum,
+     2026-07-25). See `_apply_scalar_op` + `_resolve_nested_scalar_parent`.
+
 Three correctness invariants reviewers check hardest:
 
 1. **Byte / deep-equality preservation (the raison d'être).** Applying a small
@@ -118,6 +143,7 @@ __all__ = [
     "OP_BOUND_WARN_FRACTION",
     "OP_KINDS",
     "OP_ACTIONS",
+    "NESTED_SCALAR_FIELDS",
     "TASK_OP_KIND",
     "OpSignature",
     "apply_patch",
@@ -526,12 +552,33 @@ def classify_op(op: dict, op_index: int = 0) -> OpSignature:
 # ---------------------------------------------------------------------------
 
 # Every op_kind that addresses a KEYED COLLECTION entry counts toward the bound.
-# `scalar` ops target a top-level field, not a keyed-collection entry, so they
-# do NOT contribute to the touched-keyed-entries numerator (per SC3: the
-# fraction is "touched-keyed-entries / total-keyed-entries across ALL keyed
-# collections"). A scalar op is still an op (it could co-occur with keyed ops in
-# a multi-op patch), but it neither adds to nor removes from the keyed-entry
-# population, so it is invisible to both numerator and denominator.
+# `scalar` ops target a plan-root field or an allowlisted nested scalar, not a
+# keyed-collection entry, so they do NOT contribute to the touched-keyed-entries
+# numerator (per SC3: the fraction is "touched-keyed-entries /
+# total-keyed-entries across ALL keyed collections"). A scalar op is still an op
+# (it could co-occur with keyed ops in a multi-op patch), but it neither adds to
+# nor removes from the keyed-entry population, so it is invisible to both
+# numerator and denominator.
+#
+# NESTED scalars inherit that exclusion, and that is a DECISION, not an
+# oversight — flagged in review as the one safety property the nested-addressing
+# change could silently erode ("many small nested edits" is the smuggle vector
+# the 0.50 hard-refuse exists to catch). Two things make the exclusion correct
+# here, and both must hold for any future allowlist entry:
+#
+#   1. `NESTED_SCALAR_FIELDS` is CLOSED, so there is no fan-out to smuggle
+#      through — N ops against the one allowlisted path are N sequential
+#      replaces of the SAME key, which collapse to the last one. The smuggle
+#      vector needs many distinct addressable targets; the allowlist's
+#      closedness is what denies that, not the bound gate.
+#   2. `conceptual_architecture.overview` is prose in exactly the same class as
+#      the root scalar `problem_statement`, which this gate has always excluded.
+#      Bounding the overview while leaving problem_statement unbounded would be
+#      incoherent.
+#
+# If the allowlist ever grows past a handful, revisit — that is the point at
+# which (1) stops holding. `test_nested_scalar_is_excluded_from_the_bound_gate`
+# pins the current answer so the change is deliberate.
 _KEYED_OP_KINDS: frozenset[str] = frozenset(
     {"success_criterion", "task", "component", "reference", "non_goal"}
 )
@@ -1051,8 +1098,81 @@ def _apply_non_goal_op(working: dict, op_index: int, action: str, op: dict) -> N
 
 
 # ---------------------------------------------------------------------------
-# scalar ops (top-level field addressed by name).
+# scalar ops (top-level field addressed by name, or an ALLOWLISTED nested path).
 # ---------------------------------------------------------------------------
+
+# Post-ship (nested-scalar addressing). `plan_v1` carries exactly ONE scalar
+# that is not a plan-root key and not a keyed-collection entry:
+# `conceptual_architecture.overview`. Before this allowlist NO op_kind could
+# address it — the closed `op_kind` enum has no nested form, and `scalar` is
+# root-only — so an operator amending the overview had to edit it OUT OF BAND
+# and narrate the delta in the audit row's prose. That defeats the point of the
+# log: `ops` stops being a description of the diff, and the C8
+# defeat-by-many-small-amends accountability surface goes with it.
+#
+# The allowlist is deliberately CLOSED rather than a general dotted-path
+# resolver. A general resolver would let a patch reach into keyed collections by
+# path (`success_criteria.0.criterion`), silently bypassing the keyed addressing,
+# the reference tuple-uniqueness guard, and the op-bounding denominator — the
+# exact smuggling surface T3.A exists to close. One entry, mirroring the one gap
+# `plan_v1` actually has; a future nested scalar is a one-line addition here plus
+# its `plan_v1` required-ness below.
+NESTED_SCALAR_FIELDS: tuple[str, ...] = ("conceptual_architecture.overview",)
+
+# Nested addressing is REPLACE-ONLY. Every allowlisted nested scalar is required
+# by `plan_v1` and therefore always present, so `add` always collides and
+# `remove` can only produce a post-apply-invalid plan. Refusing both structurally
+# — rather than letting `add` fall through to a collision and `remove` to exit 43
+# — is the same front-running move as the per-op-kind VALUE-shape closure (D):
+# convert a post-LLM-round-trip failure into a pre-apply refusal that names the
+# rule. It also keeps dotted addressing from implying nested key
+# creation/deletion semantics, which this substrate does not want.
+
+
+def _resolve_nested_scalar_parent(
+    working: dict, op_index: int, action: str, field_name: str
+) -> tuple[dict, str]:
+    """Resolve an ALLOWLISTED dotted `field` to its (parent dict, leaf key).
+
+    Raises `PatchApplyError` (addressing-class) when `field_name` is dotted but
+    not allowlisted, or when the parent object is absent / not an object on the
+    prior plan. The unallowlisted case reports the CAUSE ("nested paths are
+    addressable only for ...") rather than the symptom a root lookup would give
+    ("not present on the prior plan root"), which is what sent the surfacing run
+    hunting in the wrong place.
+    """
+    if field_name not in NESTED_SCALAR_FIELDS:
+        raise PatchApplyError(
+            op_index=op_index,
+            op_kind="scalar",
+            action=str(action),
+            message=(
+                f"scalar {action} address.field {field_name!r} is a nested path, "
+                "but nested paths are addressable only for the allowlisted "
+                f"plan_v1 nested scalars: {', '.join(NESTED_SCALAR_FIELDS)}. "
+                "Every other scalar is addressed by its plan-root field name; "
+                "entries inside a keyed collection are addressed by their own "
+                "op_kind (success_criterion/task/component/reference/non_goal), "
+                "never by a dotted path."
+            ),
+        )
+
+    parent_path, _, leaf = field_name.rpartition(".")
+    node: Any = working
+    for seg in parent_path.split("."):
+        node = node.get(seg) if isinstance(node, dict) else None
+        if not isinstance(node, dict):
+            raise PatchApplyError(
+                op_index=op_index,
+                op_kind="scalar",
+                action=str(action),
+                message=(
+                    f"nested scalar {field_name!r} is unresolvable: the parent "
+                    f"object {parent_path!r} is absent or not an object on the "
+                    "prior plan"
+                ),
+            )
+    return node, leaf
 
 
 def _apply_scalar_op(working: dict, op_index: int, action: str, op: dict) -> None:
@@ -1074,6 +1194,56 @@ def _apply_scalar_op(working: dict, op_index: int, action: str, op: dict) -> Non
             ),
         )
 
+    # An allowlisted dotted `field` retargets the SAME replace/add/remove
+    # semantics at the nested parent object; everything below is unchanged for
+    # the root case (`target` is the plan root when `field` carries no dot).
+    if "." in field_name:
+        # Allowlist first (the more fundamental rule, and the better message for
+        # the common miss), then the replace-only rule, then apply.
+        target, leaf = _resolve_nested_scalar_parent(
+            working, op_index, action, field_name
+        )
+        if action != "replace":
+            raise PatchApplyError(
+                op_index=op_index,
+                op_kind="scalar",
+                action=action,
+                message=(
+                    f"scalar {action} refused: nested addressing supports "
+                    f"replace ONLY, so {field_name!r} cannot be added or "
+                    "removed. Every allowlisted nested scalar is required by "
+                    "plan_v1 and therefore always present: an add always "
+                    "collides and a remove can only produce a "
+                    "post-apply-invalid plan (exit 43). Replace its value "
+                    "instead. Widening this to add/remove means an OPTIONAL "
+                    "nested scalar exists — a deliberate decision, not a "
+                    "default."
+                ),
+            )
+        _apply_scalar_to(target, op_index, action, op, leaf, field_name)
+    else:
+        _apply_scalar_to(working, op_index, action, op, field_name, None)
+
+
+def _apply_scalar_to(
+    working: dict,
+    op_index: int,
+    action: str,
+    op: dict,
+    field_name: str,
+    nested_path: str | None,
+) -> None:
+    """Apply the scalar replace/add/remove against `working` — the plan root, or
+    an allowlisted nested parent object when `nested_path` is set.
+
+    Split out so the root and nested paths share ONE set of presence/collision
+    semantics rather than drifting. `nested_path` is the full dotted address and
+    is used only to keep the not-found / collision messages truthful about WHERE
+    the miss occurred (a nested miss must not claim "the prior plan root").
+    """
+    where = "the prior plan root" if nested_path is None else f"{nested_path!r}'s parent object"
+    shown = field_name if nested_path is None else nested_path
+
     if action == "replace":
         if field_name not in working:
             raise PatchApplyError(
@@ -1081,8 +1251,8 @@ def _apply_scalar_op(working: dict, op_index: int, action: str, op: dict) -> Non
                 op_kind="scalar",
                 action=action,
                 message=(
-                    f"replace target not found: scalar field {field_name!r} is "
-                    "not present on the prior plan root"
+                    f"replace target not found: scalar field {shown!r} is "
+                    f"not present on {where}"
                 ),
             )
         working[field_name] = _coerce_value_string(op, op_index, "scalar", action)
@@ -1094,8 +1264,8 @@ def _apply_scalar_op(working: dict, op_index: int, action: str, op: dict) -> Non
                 op_kind="scalar",
                 action=action,
                 message=(
-                    f"add collides with an existing scalar field: {field_name!r} "
-                    "is already present on the prior plan root"
+                    f"add collides with an existing scalar field: {shown!r} "
+                    f"is already present on {where}"
                 ),
             )
         working[field_name] = _coerce_value_string(op, op_index, "scalar", action)
@@ -1107,8 +1277,8 @@ def _apply_scalar_op(working: dict, op_index: int, action: str, op: dict) -> Non
                 op_kind="scalar",
                 action=action,
                 message=(
-                    f"remove target not found: scalar field {field_name!r} is "
-                    "not present on the prior plan root"
+                    f"remove target not found: scalar field {shown!r} is "
+                    f"not present on {where}"
                 ),
             )
         del working[field_name]

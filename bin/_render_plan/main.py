@@ -137,12 +137,28 @@ def main(argv: list[str] | None = None) -> int:
         _emit_stderr_json({"error": "template_error", "message": str(exc)})
         return exit_codes.EXIT_TEMPLATE_ERROR
 
-    # Step 7: detect outside-anchor edits (warning only, per OO-1 RATIFIED).
+    # Step 7: detect outside-anchor divergence (warning only, per OO-1 RATIFIED).
+    #
+    # The detector compares the on-disk twin's non-anchor region against this
+    # render; it CANNOT tell an operator edit from a legitimate JSON change since
+    # the twin was written. The warning used to assert the former ("the operator
+    # has edited a section..."), which misattributes every post-amend/post-reopen
+    # re-render to an edit the operator did not make — and a warning that cries
+    # wolf on routine renders is one operators learn to skip, costing the single
+    # case it exists for. The stable token stays first on the line (it is the
+    # grep handle); the cause set follows.
     if existing_md is not None:
         hunks = detect_outside_anchor_diff(existing_md, canonical_body_naked)
         if hunks:
             print(
-                "render_plan: WARNING render-plan outside-anchor-edit-clobbered",
+                "render_plan: WARNING render-plan outside-anchor-edit-clobbered\n"
+                "  the twin's non-anchor region differs from this render and is "
+                "being overwritten.\n"
+                "  EXPECTED after an amend/reopen (the JSON legitimately "
+                "changed). A problem only if you\n"
+                "  edited the twin outside the anchor block — that edit is gone. "
+                "Operator prose belongs\n"
+                "  INSIDE the anchors, which this render preserves.",
                 file=sys.stderr,
             )
 
