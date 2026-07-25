@@ -23,6 +23,7 @@ Three consequences are pinned here, because each is easy to regress silently:
 
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
@@ -33,7 +34,11 @@ from bin._planner.two_call import (
     _discover_latest_opus,
     _resolve_model_id,
 )
-from bin._sdk_bridge import SubscriptionClient
+from bin._sdk_bridge import (
+    _METERED_AUTH_ENV_VARS,
+    SubscriptionClient,
+    _force_subscription_auth,
+)
 
 
 def test_default_client_is_the_subscription_bridge() -> None:
@@ -136,6 +141,72 @@ def test_unimportable_agent_sdk_raises_an_actionable_error(monkeypatch) -> None:
     assert "subscription" in message
     # The original import failure is preserved for debugging.
     assert isinstance(ei.value.__cause__, ImportError)
+
+
+# ---------------------------------------------------------------------------
+# The metered-credential scrub. This is the invariant the whole "no API key
+# needed" property rests on, and it was the one piece of the transport with no
+# coverage at all.
+#
+# Added after a downstream agent spent days believing splock could not run
+# without `ANTHROPIC_API_KEY` — a belief that survived two careful reviews
+# because a claim of the form "I can't do X" removes the action that would
+# falsify it. The claim was false: the transport is subscription-only. Pinning
+# the scrub is what keeps the belief from becoming true by regression, which is
+# the only way it could come back.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("var", _METERED_AUTH_ENV_VARS)
+def test_metered_credentials_are_hidden_from_the_spawned_cli(monkeypatch, var: str) -> None:
+    """Claude Code PREFERS an inherited metered key over the subscription, and
+    `bin/plan` / `bin/qa` `load_env_file()` that key straight into the env. If
+    the scrub regresses, splock silently starts billing the metered account —
+    silently, because everything still works."""
+    monkeypatch.setenv(var, "sk-ant-metered-should-not-leak")
+
+    with _force_subscription_auth():
+        assert var not in os.environ, (
+            f"{var} was visible to the query; the spawned CLI would bill metered"
+        )
+
+    assert os.environ[var] == "sk-ant-metered-should-not-leak", "not restored"
+
+
+def test_metered_credentials_are_restored_even_when_the_query_raises(monkeypatch) -> None:
+    """Restoration is in a `finally` because other subsystems (the
+    grouping-policy LLM judges) still legitimately use the key. A leaked
+    stripped state would break them at a distance from the cause."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-restore-me")
+
+    with pytest.raises(RuntimeError):
+        with _force_subscription_auth():
+            assert "ANTHROPIC_API_KEY" not in os.environ
+            raise RuntimeError("query blew up")
+
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-restore-me"
+
+
+def test_an_absent_metered_key_is_the_correct_state_not_an_error(monkeypatch) -> None:
+    """The belief-killer, stated as an executable assertion.
+
+    A missing `ANTHROPIC_API_KEY` is the NORMAL operating state of this
+    substrate. The scrub must handle absence without raising and without
+    inventing the variable — nothing anywhere may treat "no metered key" as a
+    precondition failure.
+    """
+    for var in _METERED_AUTH_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+    with _force_subscription_auth():
+        for var in _METERED_AUTH_ENV_VARS:
+            assert var not in os.environ
+
+    for var in _METERED_AUTH_ENV_VARS:
+        assert var not in os.environ, "the scrub resurrected a var that was never set"
+
+    # And the client still constructs — no key, no problem.
+    assert isinstance(_default_client(), SubscriptionClient)
 
 
 @pytest.mark.parametrize("falsey", ["0", "false", "no"])

@@ -82,8 +82,11 @@ EXIT_JUNCTION_KIND_NOT_APPLICABLE = 38
 `test_gate` (`review_gate` / `phase_boundary`). Distinct from both 0
 ("gate passed") and 10 ("gate failed") so a driver never treats "the
 collect-check does not apply here" as a cleared gate — the fail-open
-reported in issue #39. 38 is unclaimed across the family registries
-(cf. `_update_orchestrator`'s code-18 collision note)."""
+reported in issue #39. 38 is scope-disambiguated BY BINARY, not
+unclaimed: `bin/_cli_lint/exit_codes.py` also defines 38
+(`EXIT_CLI_LINT_VIOLATION`). Different binary, so no collision — the
+same arrangement code 10 already carries (cf. `_update_orchestrator`'s
+code-18 collision note)."""
 
 
 DRIVER_EMITTED_CODES = frozenset(

@@ -173,6 +173,97 @@ class TestsEnabledContractError(SchemaRejectedError):
         return payload
 
 
+class DegenerateOrchestratorError(SchemaRejectedError):
+    """The orchestrator commits to no work at all — a silent no-op success.
+
+    `/implplan` could emit an orchestrator whose every task declares no
+    `file_paths_touched`, no `tests_enabled` and no `test_plan`, write it
+    to disk, and exit 0. Nothing on the path checked that the emitted DAG
+    had substance: the per-task rules are all individually satisfied,
+    because `tests_enabled: []` is *deliberately* legitimate for
+    bookkeeping/doc tasks and `_check_tests_enabled_contract` must not
+    false-positive on it. The gap is that no check looked at the
+    AGGREGATE. Per-task emptiness is fine; UNIVERSAL emptiness means the
+    emission produced a DAG that touches zero files and runs zero tests,
+    which is not an executable plan — and exiting 0 on it is the worst
+    failure shape in a substrate built on loud refusals, because the
+    operator's next move is to run it.
+
+    Subclass of `SchemaRejectedError` so `bin/verify_plan --strict` and
+    every legacy caller that catches the parent reject the document
+    unchanged. The operator-direct /implplan seams catch this type FIRST
+    (like `TestsEnabledContractError`) and make it FATAL, where a generic
+    strict violation stays warn-only there. It maps to the generic
+    `EXIT_SCHEMA_REJECTED` rather than minting a new code — the
+    discriminator is the `error` key in the structured stderr envelope,
+    the same arrangement `_cli_lint` uses for its rules.
+    """
+
+    __test__ = False
+
+    def as_stderr_payload(self) -> dict:
+        payload = super().as_stderr_payload()
+        payload["error"] = "degenerate_orchestrator_rejected"
+        return payload
+
+
+def _check_orchestrator_has_substance(payload: dict) -> list[dict]:
+    """Reject an orchestrator in which NO task declares any work.
+
+    A task counts as substantive when it declares any of:
+
+    * `file_paths_touched` — it will change something;
+    * `tests_enabled` — it will be verified by something;
+    * `test_plan` — it declares how it will be checked, which is also the
+      home of the `verification_kind:` marker that legitimizes an empty
+      `tests_enabled` for doc/bookkeeping tasks.
+
+    So a plan made entirely of properly-marked doc tasks is NOT degenerate
+    — those tasks carry a `test_plan`. What this catches is the emission
+    that produced pure stubs.
+
+    Deliberately requires EVERY task to be empty before refusing. A single
+    empty task among substantive ones is normal and must not trip: the
+    aggregate is what distinguishes a stub emission from a sparse one.
+    """
+    tasks = payload.get("tasks", []) or []
+
+    # `tasks` is `minItems: 1` in orchestrator_v1, so schema validation has
+    # already rejected the empty case before strict invariants run. Guard it
+    # anyway rather than let "every task is empty" pass vacuously if that
+    # bound is ever relaxed — a zero-task orchestrator is the same defect.
+    if not tasks:
+        return [{
+            "path": "/tasks",
+            "message": (
+                "orchestrator declares no tasks at all; there is nothing to "
+                "execute"
+            ),
+            "validator": "strict-orchestrator-substance",
+        }]
+
+    for task in tasks:
+        if task.get("file_paths_touched") or task.get("tests_enabled"):
+            return []
+        if task.get("test_plan"):
+            return []
+
+    return [{
+        "path": "/tasks",
+        "message": (
+            f"every one of the {len(tasks)} tasks declares empty "
+            f"file_paths_touched AND empty tests_enabled AND no test_plan — "
+            f"this orchestrator commits to touching no files and running no "
+            f"tests, so it is not an executable DAG. This is the all-stub "
+            f"emission shape: re-run the emission rather than executing it. "
+            f"(A task legitimately having empty tests_enabled is fine — a "
+            f"doc/bookkeeping task declares a `test_plan` marker instead. "
+            f"What is rejected is ALL tasks being empty at once.)"
+        ),
+        "validator": "strict-orchestrator-substance",
+    }]
+
+
 def run_strict_invariants(
     payload: dict, kind: PlanKind, source_path: Path
 ) -> None:
@@ -194,6 +285,7 @@ def run_strict_invariants(
     """
     violations: list[dict] = []
     contract_violations: list[dict] = []
+    substance_violations: list[dict] = []
 
     if kind == "plan":
         violations.extend(_check_task_skeleton_unique_ids(payload))
@@ -205,10 +297,31 @@ def run_strict_invariants(
         violations.extend(_check_junctions_after_task_resolves(payload))
         contract_violations = _check_tests_enabled_contract(payload)
         violations.extend(contract_violations)
+        substance_violations = _check_orchestrator_has_substance(payload)
+        violations.extend(substance_violations)
 
     if violations:
+        # Precedence, in order. `TestsEnabledContractError` stays FIRST
+        # unchanged, per SC2's "the distinct plan-defect signal is never
+        # masked by a co-occurring violation".
+        #
+        # As it happens the two are MUTUALLY EXCLUSIVE today, so this
+        # ordering is currently unreachable: every way to trip the
+        # tests_enabled contract needs a non-empty `tests_enabled` or a
+        # non-empty `test_plan`, and either one makes that task
+        # substantive, so the aggregate cannot be degenerate at the same
+        # time. Kept regardless — it becomes live the moment the substance
+        # rule is widened (e.g. "no file_paths_touched is degenerate
+        # regardless of test_plan"), and SC2's precedence should not have
+        # to be rediscovered then.
+        # `test_degeneracy_and_the_tests_enabled_contract_cannot_co_occur`
+        # is the tripwire: it fails if they ever start co-occurring.
         if contract_violations:
             raise TestsEnabledContractError(
+                path=str(source_path), violations=violations
+            )
+        if substance_violations:
+            raise DegenerateOrchestratorError(
                 path=str(source_path), violations=violations
             )
         raise SchemaRejectedError(

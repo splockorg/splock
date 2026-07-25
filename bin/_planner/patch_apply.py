@@ -566,19 +566,33 @@ def classify_op(op: dict, op_index: int = 0) -> OpSignature:
 # the 0.50 hard-refuse exists to catch). Two things make the exclusion correct
 # here, and both must hold for any future allowlist entry:
 #
-#   1. `NESTED_SCALAR_FIELDS` is CLOSED, so there is no fan-out to smuggle
-#      through — N ops against the one allowlisted path are N sequential
-#      replaces of the SAME key, which collapse to the last one. The smuggle
-#      vector needs many distinct addressable targets; the allowlist's
-#      closedness is what denies that, not the bound gate.
-#   2. `conceptual_architecture.overview` is prose in exactly the same class as
+#   1. `conceptual_architecture.overview` is prose in exactly the same class as
 #      the root scalar `problem_statement`, which this gate has always excluded.
 #      Bounding the overview while leaving problem_statement unbounded would be
-#      incoherent.
+#      incoherent. (This is the load-bearing reason.)
+#   2. `NESTED_SCALAR_FIELDS` is CLOSED, so there is no fan-out to smuggle
+#      through — N ops against the one allowlisted path are N sequential
+#      replaces of the SAME key, which collapse to the last one. This does less
+#      work than it looks: same-key ops are degenerate anyway (array order, last
+#      wins), so the addressing model already forecloses most of what the
+#      allowlist's closedness would.
 #
-# If the allowlist ever grows past a handful, revisit — that is the point at
-# which (1) stops holding. `test_nested_scalar_is_excluded_from_the_bound_gate`
-# pins the current answer so the change is deliberate.
+# READ THIS BEFORE CONCLUDING THE GATE COVERS MORE THAN IT DOES. What it bounds
+# is STRUCTURAL rewrite — churn across keyed entries — NOT wholesale rewrite. A
+# patch of nothing but scalar ops leaves `touched` at 0, which is below
+# `OP_BOUND_MIN_TOUCHED`, so the gate does not engage at all. `title` +
+# `problem_statement` + `tier` + `overview` is most of a plan's semantic content
+# by character count and every one of them is unbounded. That was already true
+# before nested addressing existed; adding `overview` widens the unbounded set by
+# one field without creating the hole. It is a defensible design — structure is
+# what downstream consumes — but the accountability surface for PROSE drift is
+# the per-slug amend audit log (`<slug>_amend_log.jsonl`, which records the full
+# op-list INCLUDING values), not this gate. Do not let a future reader infer
+# otherwise.
+#
+# If the allowlist ever grows past a handful, revisit (2).
+# `test_nested_scalar_is_excluded_from_the_bound_gate` pins the current answer so
+# the change is deliberate.
 _KEYED_OP_KINDS: frozenset[str] = frozenset(
     {"success_criterion", "task", "component", "reference", "non_goal"}
 )

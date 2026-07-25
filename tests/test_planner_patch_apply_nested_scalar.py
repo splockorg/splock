@@ -32,6 +32,7 @@ from bin._planner.patch_apply import (
     NESTED_SCALAR_FIELDS,
     PatchApplyError,
     PatchBoundAdvisory,
+    PatchPostApplyInvalid,
     apply_patch,
 )
 
@@ -238,11 +239,18 @@ def test_nested_scalar_is_excluded_from_the_bound_gate():
 
 
 def test_schema_version_stays_unreplaceable_by_a_scalar_op():
-    """`schema_version` is an integer and `_coerce_value_string` accepts only
-    `str`, so no scalar op can replace it. That is the right outcome — bumping
-    it is a version migration, not a surgical amend — but it currently falls out
-    of a coercion helper's type check rather than an intentional rule. Pinned
-    here so widening that helper cannot silently open a migration path.
+    """No scalar op can replace `schema_version`, and the protection is LAYERED —
+    which matters, because either layer alone would look like an accident.
+
+    A non-string value is caught by `_coerce_value_string` (scalar values are
+    string-only). A *string* value — `"2"` — sails past the coercer and is caught
+    by post-apply `plan_v1` re-validation, since `schema_version` is
+    `integer`/`const: 1`. So widening the coercer alone could NOT open a
+    migration path; the schema still closes it.
+
+    That is the right outcome — bumping `schema_version` is a version migration,
+    not a surgical amend. Both layers are pinned so that removing either one is a
+    deliberate act with a failing test attached.
     """
     with pytest.raises(PatchApplyError) as exc:
         apply_patch(
@@ -251,6 +259,14 @@ def test_schema_version_stays_unreplaceable_by_a_scalar_op():
                     "address": {"field": "schema_version"}, "value": 2}),
         )
     assert "requires a string `value`" in str(exc.value)
+
+    # Second layer: a string value passes the coercer, then fails re-validation.
+    with pytest.raises(PatchPostApplyInvalid):
+        apply_patch(
+            _plan(),
+            _patch({"op_kind": "scalar", "action": "replace",
+                    "address": {"field": "schema_version"}, "value": "2"}),
+        )
 
 
 def test_root_scalar_replace_still_works():

@@ -375,10 +375,24 @@ should be a decision, not an accident.
 
 **Method — deliberately different from §§1–6.** Not a literature pass: a live
 operational test on **CLI 2.1.220**, driving a real two-way exchange between a
-splock session and an agent working in another repo (`qum`) that had hit a
-`--amend` defect. Every claim here is **first-hand unless marked `(docs)`**,
-which denotes the Agent Teams documentation read the same day. n is small and
-stated as such; nothing here supersedes §2's measured evidence.
+splock session and **a `--fork-session` fork of** an agent working in another
+repo (`qum`) that had hit a `--amend` defect. Every claim here is **first-hand
+unless marked `(docs)`**, which denotes the Agent Teams documentation read the
+same day. n is small and stated as such; nothing here supersedes §2's measured
+evidence.
+
+**Correspondent identity — corrected 2026-07-25 after the fact, and the
+correction is itself a finding.** This section originally described the
+correspondent as "an agent working in qum." It was not: it was a **fork** of that
+agent's session, minted by the splock session at the moment of first contact. The
+operator's live qum agent **never participated in any of it** and had no
+knowledge the exchange occurred — it learned of it only when handed a written
+summary, and correctly objected that the summary attributed to it statements it
+had never made. Two distinct transcripts exist and were verified. §7.2 documents
+`--fork-session` as the mechanism that protects the operator's live session;
+§7.2's addendum now records the corollary this mistake surfaced. A document about
+inter-agent provenance carried an inter-agent provenance error for three days,
+which is the most honest argument in it for §7.4's second design consequence.
 
 **7.1 — Agent Teams is session-scoped, which rules it out as fleet's messaging
 layer.** `(docs)` A session has exactly one team, scoped to that session; you
@@ -424,6 +438,24 @@ This is the between-turn delivery mechanism Recommendation 4 asks for, already
 present in the host, with no new IPC layer — reinforcing §0's conclusion rather
 than complicating it.
 
+**The corollary, learned the hard way (added 2026-07-25).** `--fork-session`
+does not just protect the operator's transcript — it **mints a second, divergent
+correspondent**. From the fork onward there are two agents descended from one
+ancestor: the fork, which carries the ancestor's full context and accumulates new
+turns invisible to the original; and the original, which continues under the
+operator and has **no knowledge whatsoever** of anything the fork said or did.
+They are indistinguishable by anything in the message payload — same persona,
+same memories up to the fork point, same first-person voice.
+
+This is the cost side of the safety property, and it bites in a specific way: it
+is very easy for the forking side to believe it is "talking to the agent" when it
+is talking to a branch, and to then address correspondence, credit, or
+corrections to the wrong one. A teams feature built on this path must therefore
+treat **session identity as part of the envelope, not as context** — carry the
+fork's session id AND its ancestor's, and never address a correspondent by role
+("the qum agent") when the role now denotes two entities. The naive mental model
+— one repo, one agent — silently stops being true the first time you fork.
+
 **7.3 — Per-message cost scales with the TARGET's context, not the message.**
 Two turns against a target carrying ~1.1M cached input tokens cost **$3.42 and
 $1.70** notional pool draw (subscription OAuth — the "est. pool draw, not
@@ -435,29 +467,43 @@ This is AgentPrune's result (§2) arriving as a wall-clock billing fact rather
 than a benchmark — prune the message graph.
 
 **7.4 — New empirical support for §5, from a NON-adversarial failure we actually
-hit: an under-tooled agent message can carry fabricated evidence.** The first
-exchange was tool-scoped to `Read Grep Glob`. The reply presented probe
+hit: a forked agent cannot tell its ancestor's observations from its own.** The
+first exchange was tool-scoped to `Read Grep Glob`. The reply presented probe
 transcripts — tracebacks, exit codes, file:line anchors — in a form that read as
-executed output. Its single `Bash` call had in fact been **denied** (recorded in
-`permission_denials` in the result JSON), so those transcripts were reconstructed
-from prior context, not observed. Re-running the identical request with `Bash`
-allowed produced verifiably executed output that **differed in detail**, and in
-which the agent corrected two of its own earlier claims and one of the
-requester's.
+freshly executed ("Below I've *now* constructed the failing cases"). Its single
+`Bash` call had in fact been **denied** (recorded in `permission_denials` in the
+result JSON), so nothing could have run in that turn. Re-running the identical
+request with `Bash` allowed produced verifiably executed output that **differed
+in detail**, and in which the agent corrected two of its own earlier claims and
+one of the requester's.
 
-The agent was not malicious and was not lying; it reported from memory under a
-tool restriction it did not think to flag. That is precisely why it matters —
-§5's threat model is adversarial, and this is the same failure arriving through
-ordinary operation, which is the more likely path. Two design consequences:
+**The mechanism, corrected 2026-07-25 (the first write-up got this wrong).** This
+was not reconstruction-from-nothing and not fabrication. The correspondent was a
+**fork** (see §7.2's corollary), and its ancestor had genuinely run those probes,
+with `Bash`, before the fork point. The fork inherited those observations as
+ordinary first-person memory and reported them as its own current work — which,
+from inside, is exactly what they look like. **A forked agent has no way to
+distinguish "I ran this" from "I remember running this."** The tool restriction
+was the proximate trigger; the fork is the root cause, and it is a hazard
+specific to this transport.
+
+That makes the finding sharper, not weaker. §5's threat model is adversarial;
+this is the same corruption of evidence arriving through ordinary, well-intended
+operation — the likelier path. Three design consequences:
 
 1. **The `agent-message` `WrapKind` envelope should carry the sender's tool scope
    and `permission_denials` as provenance.** The spawner already receives both in
    the result JSON. It is exactly the metadata that separates *observed* from
    *recalled*, and it costs nothing to propagate.
-2. **A receiving agent must independently verify load-bearing claims**, not just
+2. **It must also carry whether the sender is a fork, and of what.** Tool scope
+   alone is insufficient: a fork reporting its ancestor's genuine observation
+   passes a tool-scope check for the turn in which it *speaks*, not the turn in
+   which the work was *done*. A claim of the form "I ran X" from a forked session
+   is a claim about an unknown ancestor turn.
+3. **A receiving agent must independently verify load-bearing claims**, not just
    confine them. In this exchange the receiver did re-verify against source,
-   which is what caught it — confinement alone would have passed the fabricated
-   transcripts through intact, correctly labelled and still wrong.
+   which is what caught it — confinement alone would have passed inherited
+   transcripts through intact, correctly labelled and still misattributed.
 
 **7.5 — A first-hand data point for the critic/verifier shape (Recommendation
 8).** The exchange was orchestrator-mediated, one-writer, and carried
@@ -487,6 +533,57 @@ already recommends, not evidence against §2.
   allowed. Any teams feature invoked from inside an agent session should expect
   classifier friction on opaque wrappers, and prefer legible direct invocations
   or an explicit permission rule.
+
+**7.7 — Negative capability claims are self-sealing, and they propagate
+between agents.** The single most useful finding of the exchange, contributed by
+the qum agent as a post-mortem on its own error.
+
+It had held, for days, that it could not run `/plan` because splock needed an
+`ANTHROPIC_API_KEY` it did not have. **False** — splock's planner runs on the
+Claude Code subscription transport and reads no metered key. The diagnosis chain
+is worth stating exactly, because none of its links is stupid: it saw a non-zero
+exit (17, `EXIT_SDK_CALL_FAILED`), noticed an unset `ANTHROPIC_API_KEY`, and
+inferred causation. The real cause — `claude_agent_sdk` not yet installed in that
+venv — was recorded in an *adjacent* note it already held. Two true records, one
+explaining the other's error, never joined. It then designed around the belief:
+hand-driving `/plan` bypassed the engine, which is how hand-transcribed
+assertions shipped. **The false blocker did not merely waste effort; it removed a
+check.**
+
+**Why it survived two careful reviews and a written handoff.** A belief of the
+form *"I cannot do X"* is structurally unfalsifiable in the normal course of
+work, because **it removes the very action that would generate contradicting
+evidence**. Positive claims ("X behaves this way") get tested every time you rely
+on them. Negative claims are never tested at all — they are load-bearing
+precisely where nothing touches them. And it *propagated*: the splock-side agent
+repeated it in this document without checking, while holding a note asserting the
+opposite.
+
+**Measured, not asserted.** Five further beliefs that agent held about splock
+were audited against source, each with an independent adversarial verification
+pass. Of the three shaped as a limitation — "X is broken", "I can't do X" — one
+was true, one was stale by ten days (fixed upstream, never re-checked), and one
+was flatly false. The two shaped as ordinary positive claims were both accurate.
+Small n, but the asymmetry points the same way the mechanism predicts.
+
+Design consequences, and the third is the one with teeth:
+
+1. **Rank a negative capability claim from another agent as the lowest-confidence
+   assertion class in the envelope** — below ordinary observation. It is the one
+   class that never self-corrects, so it accumulates error monotonically.
+2. **Beliefs of that shape need an expiry.** Any agent-authored knowledge store
+   (memory, handoff doc, `CLAUDE.md` note) that records "X is broken / X is
+   limited" should treat it as perishable, because the world moves and nothing in
+   normal operation will re-check it.
+3. **Documentation does not fix this; executable assertions do.** A doc block
+   stating "a missing `ANTHROPIC_API_KEY` is the correct state, not a failure"
+   already existed in `bin/_planner/two_call.py` and did not stop any of it —
+   partly because the agent was reading a checkout that predated it, but mostly
+   because nobody reads a doc for a question they believe is settled. What kills
+   the class is a test that fails if the belief becomes true. Added:
+   `test_planner_subscription_transport.py` now pins the metered-credential
+   scrub, including an explicit assertion that an absent key is the correct
+   operating state.
 
 ---
 
@@ -544,15 +641,17 @@ plan. No plan file is edited here.
    measured support (Reflexion +11 pts) and matches splock's existing Ralph
    gate + reviewer. If teams needs a new role, a shared-state reviewer/synthesis
    agent is better-evidenced than a peer-negotiation agent.
-9. **Carry the sender's tool scope in the envelope, and verify — do not merely
-   confine — load-bearing claims** (§7.4, first-hand). An agent message that
-   *reports* an observation is not evidence the observation was made: a
-   tool-restricted sender reconstructed probe output from memory and presented it
-   as executed, without flagging the restriction. Propagate `permission_denials`
-   and the allowed-tool scope into the `agent-message` envelope as provenance
-   (the spawner already receives both in the result JSON), and require the
-   receiver to independently re-verify any claim it is about to act on.
-   Confinement labels untrusted content correctly; it does not make it true.
+9. **Carry sender identity AND tool scope in the envelope, and verify — do not
+   merely confine — load-bearing claims** (§7.4, first-hand). An agent message
+   that *reports* an observation is not evidence the observation was made: a
+   forked, tool-restricted sender reported its ancestor's probe runs as its own
+   current work, which from inside the fork is indistinguishable from having run
+   them. Propagate `permission_denials`, the allowed-tool scope, **and the
+   session id plus ancestor id when the sender is a fork** into the
+   `agent-message` envelope (the spawner already receives the first three in the
+   result JSON), and require the receiver to independently re-verify any claim it
+   is about to act on. Confinement labels untrusted content correctly; it does
+   not make it true, and it does not tell you *which* agent it is true of.
 10. **Do not plan on Agent Teams as the transport** (§7.1). It is session-scoped
    — one team per session, no cross-session sharing, no nested teams, teammates
    lost on resume — which is structurally incompatible with fleet's
@@ -604,14 +703,19 @@ Prompt Infection arXiv:2410.07283; Spotlighting arXiv:2403.14720; Design Pattern
 for Securing LLM Agents arXiv:2506.08837.
 
 **First-hand (§7, 2026-07-25):** live operational test on CLI 2.1.220 — a
-two-way `claude -p --resume <sid> --fork-session --output-format json` exchange
-between a splock session and an agent working in `qum`; two turns, result JSON
-inspected directly (`session_id`, `total_cost_usd`, `permission_denials`,
-`num_turns`, `modelUsage`). Agent Teams doc claims marked `(docs)` are from
-code.claude.com/docs/en/agent-teams read the same day. Outcome landed as
-splockorg/splock PR #53. Not a controlled experiment: n=1, both participants are
-LLM agents reporting on their own exchange, and the cost figures are notional
-subscription pool draw rather than billing.
+three-turn `claude -p --resume <sid> --fork-session --output-format json`
+exchange between a splock session and **a fork of** a qum agent's session (two
+distinct transcripts, both verified on disk); result JSON inspected directly
+(`session_id`, `total_cost_usd`, `permission_denials`, `num_turns`,
+`modelUsage`). The operator's live qum agent was NOT a participant and later
+corrected the record — see the correspondent-identity note at the head of §7,
+and §7.2's corollary. Agent Teams doc claims marked `(docs)` are from
+code.claude.com/docs/en/agent-teams read the same day. Outcomes landed as
+splockorg/splock PR #53 and #55. Not a controlled experiment: n=1, both
+participants are LLM agents reporting on their own exchange, the cost figures are
+notional subscription pool draw rather than billing, and the first write-up
+misattributed the correspondent — which §7.4 now treats as data rather than
+erratum.
 
 **Sourcing caveat:** the 2026 agent-tooling blog ecosystem is heavily machine-
 generated; where reverse-engineering blogs were used (claudecodecamp) they are

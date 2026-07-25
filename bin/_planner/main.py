@@ -1294,9 +1294,13 @@ def main(argv: list[str] | None = None) -> int:
     # T3's scope, and chain mode still rejects them via verify_plan
     # --strict.
     if args.step == "implplan" and isinstance(payload, dict):
-        from bin._render_plan.exit_codes import EXIT_TESTS_ENABLED_REJECTED
+        from bin._render_plan.exit_codes import (
+            EXIT_SCHEMA_REJECTED,
+            EXIT_TESTS_ENABLED_REJECTED,
+        )
         from bin._render_plan.json_loader import SchemaRejectedError
         from bin._verify_plan.strict import (
+            DegenerateOrchestratorError,
             TestsEnabledContractError,
             run_strict_invariants,
         )
@@ -1310,6 +1314,18 @@ def main(argv: list[str] | None = None) -> int:
         except TestsEnabledContractError as exc:
             _emit_stderr_json(exc.as_stderr_payload())
             return EXIT_TESTS_ENABLED_REJECTED
+        except DegenerateOrchestratorError as exc:
+            # FATAL here, unlike the generic strict violation below. An
+            # all-stub orchestrator that exits 0 is a silent no-op success:
+            # the artifact lands on disk looking authored, and the
+            # operator's next move is to execute a DAG that touches no
+            # files and runs no tests. Warning about that at exit 0 would
+            # put it in the one signal class an agent-driven run reliably
+            # misses (exit codes are checked; stderr at exit 0 is not).
+            # Refusing BEFORE the write is what makes "nothing lands on
+            # disk" true for this defect too.
+            _emit_stderr_json(exc.as_stderr_payload())
+            return EXIT_SCHEMA_REJECTED
         except SchemaRejectedError as exc:
             print(
                 f"warning: strict invariants flagged the emitted "
@@ -1399,31 +1415,55 @@ def main(argv: list[str] | None = None) -> int:
     # on this operator-direct path — chain mode still rejects those via
     # `bin/verify_plan --strict`.
     if args.step == "implplan":
-        from bin._render_plan.exit_codes import EXIT_TESTS_ENABLED_REJECTED
+        from bin._render_plan.exit_codes import (
+            EXIT_SCHEMA_REJECTED,
+            EXIT_TESTS_ENABLED_REJECTED,
+        )
         from bin._verify_plan.strict import (
+            DegenerateOrchestratorError,
             TestsEnabledContractError,
             revalidate_orchestrator_file,
         )
 
+        def _undo_rewrite() -> bool:
+            """Restore the pre-rewrite bytes, or remove a fresh write.
+
+            Shared by both fatal dispositions so the two cannot drift into
+            different unwind semantics — the failure mode must stay
+            "nothing lands on disk" for each.
+            """
+            if _pre_rewrite_orch_bytes is not None:
+                return _rollback_json(target, _pre_rewrite_orch_bytes)
+            # Fresh write (no prior orchestrator): remove the rejected
+            # artifact. Best-effort.
+            try:
+                target.unlink()
+                return True
+            except OSError:
+                return False
+
         try:
             revalidate_orchestrator_file(target)
         except TestsEnabledContractError as exc:
-            if _pre_rewrite_orch_bytes is not None:
-                _undone = _rollback_json(target, _pre_rewrite_orch_bytes)
-            else:
-                # Fresh write (no prior orchestrator): remove the rejected
-                # artifact so the failure mode matches the pre-write seam
-                # ("nothing lands on disk"). Best-effort.
-                try:
-                    target.unlink()
-                    _undone = True
-                except OSError:
-                    _undone = False
+            _undone = _undo_rewrite()
             envelope = exc.as_stderr_payload()
             envelope["reentry"] = "post_write_rewrite_revalidation"
             envelope["rewrite_undone"] = _undone
             _emit_stderr_json(envelope)
             return EXIT_TESTS_ENABLED_REJECTED
+        except DegenerateOrchestratorError as exc:
+            # Same disposition as the contract violation, and for the same
+            # reason: an all-stub orchestrator left on disk at exit 0 is a
+            # silent no-op success. The pre-write seam should already have
+            # caught this; reaching it here means write-path divergence
+            # produced a degenerate artifact from a substantive payload, so
+            # the unwind matters more, not less.
+            _undone = _undo_rewrite()
+            envelope = exc.as_stderr_payload()
+            envelope["reentry"] = "post_write_rewrite_revalidation"
+            envelope["rewrite_undone"] = _undone
+            _emit_stderr_json(envelope)
+            return EXIT_SCHEMA_REJECTED
         except Exception as exc:  # noqa: BLE001 — warn-only generic re-validation
             print(
                 f"warning: post-write re-validation flagged the written "
