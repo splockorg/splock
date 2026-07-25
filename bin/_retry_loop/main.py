@@ -118,8 +118,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Sanctioned operator reset of the persisted per-boundary "
             "retry counter before running (the counter survives a "
-            "cap-exhaustion halt by design; without this the only reset "
-            "path is chain resume). Explicit intent — the reset is "
+            "cap-exhaustion halt by design; this is the ONLY reset "
+            "path — resuming the chain does not clear it). Explicit "
+            "intent — the reset is "
             "logged to _orchestrator_log.jsonl."
         ),
     )
@@ -750,7 +751,8 @@ def _run_boundary(args: argparse.Namespace) -> int:
                     f"before this run (0 iterations spawned; no new "
                     f"morning-review entry). See the original halt entry "
                     f"under docs/plans/{args.slug}/morning-review/; reset "
-                    f"deliberately with --fresh, or resume the chain."
+                    f"deliberately with --fresh (the only reset path — "
+                    f"resuming the chain does NOT clear the counter)."
                 ),
             })
         return exit_codes.EXIT_RETRY_EXCEEDED

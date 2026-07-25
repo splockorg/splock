@@ -534,6 +534,57 @@ already recommends, not evidence against §2.
   classifier friction on opaque wrappers, and prefer legible direct invocations
   or an explicit permission rule.
 
+**7.7 — Negative capability claims are self-sealing, and they propagate
+between agents.** The single most useful finding of the exchange, contributed by
+the qum agent as a post-mortem on its own error.
+
+It had held, for days, that it could not run `/plan` because splock needed an
+`ANTHROPIC_API_KEY` it did not have. **False** — splock's planner runs on the
+Claude Code subscription transport and reads no metered key. The diagnosis chain
+is worth stating exactly, because none of its links is stupid: it saw a non-zero
+exit (17, `EXIT_SDK_CALL_FAILED`), noticed an unset `ANTHROPIC_API_KEY`, and
+inferred causation. The real cause — `claude_agent_sdk` not yet installed in that
+venv — was recorded in an *adjacent* note it already held. Two true records, one
+explaining the other's error, never joined. It then designed around the belief:
+hand-driving `/plan` bypassed the engine, which is how hand-transcribed
+assertions shipped. **The false blocker did not merely waste effort; it removed a
+check.**
+
+**Why it survived two careful reviews and a written handoff.** A belief of the
+form *"I cannot do X"* is structurally unfalsifiable in the normal course of
+work, because **it removes the very action that would generate contradicting
+evidence**. Positive claims ("X behaves this way") get tested every time you rely
+on them. Negative claims are never tested at all — they are load-bearing
+precisely where nothing touches them. And it *propagated*: the splock-side agent
+repeated it in this document without checking, while holding a note asserting the
+opposite.
+
+**Measured, not asserted.** Five further beliefs that agent held about splock
+were audited against source, each with an independent adversarial verification
+pass. Of the three shaped as a limitation — "X is broken", "I can't do X" — one
+was true, one was stale by ten days (fixed upstream, never re-checked), and one
+was flatly false. The two shaped as ordinary positive claims were both accurate.
+Small n, but the asymmetry points the same way the mechanism predicts.
+
+Design consequences, and the third is the one with teeth:
+
+1. **Rank a negative capability claim from another agent as the lowest-confidence
+   assertion class in the envelope** — below ordinary observation. It is the one
+   class that never self-corrects, so it accumulates error monotonically.
+2. **Beliefs of that shape need an expiry.** Any agent-authored knowledge store
+   (memory, handoff doc, `CLAUDE.md` note) that records "X is broken / X is
+   limited" should treat it as perishable, because the world moves and nothing in
+   normal operation will re-check it.
+3. **Documentation does not fix this; executable assertions do.** A doc block
+   stating "a missing `ANTHROPIC_API_KEY` is the correct state, not a failure"
+   already existed in `bin/_planner/two_call.py` and did not stop any of it —
+   partly because the agent was reading a checkout that predated it, but mostly
+   because nobody reads a doc for a question they believe is settled. What kills
+   the class is a test that fails if the belief becomes true. Added:
+   `test_planner_subscription_transport.py` now pins the metered-credential
+   scrub, including an explicit assertion that an absent key is the correct
+   operating state.
+
 ---
 
 ## Recommendations for /plan

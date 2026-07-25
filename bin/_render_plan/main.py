@@ -255,7 +255,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Render in-memory and diff against existing MD. Exits 0 on "
-            "byte-identical match, exits 11 on drift. Wired into CI."
+            "byte-identical match, exits 11 on drift. Non-destructive: "
+            "never touches the MD file."
         ),
     )
     return parser
