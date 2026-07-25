@@ -190,14 +190,21 @@ def wrap_in_anchors(content: str) -> str:
 def detect_outside_anchor_diff(
     existing_md: str | None, canonical_body: str
 ) -> list["DiffHunk"]:
-    """Detect operator edits outside the anchor block.
+    """Detect divergence between the twin's non-anchor region and this render.
 
     Per implplan §B.impl.11 #1 (RATIFIED 2026-05-20, lines 1404-1412) and
     §B.impl.4 step 7 (line 1115): when the existing MD's non-anchor
     region differs from what the new canonical body would produce
-    pre-anchor-insertion, the operator has edited a section the renderer
-    is about to clobber. We emit a warning (not a refusal); the render
-    proceeds.
+    pre-anchor-insertion, the renderer is about to clobber that region.
+    We emit a warning (not a refusal); the render proceeds.
+
+    This is a DIVERGENCE detector, not an edit detector — a distinction the
+    caller's warning text depends on. Two causes produce the same signal and
+    this function cannot separate them: an operator edit outside the anchors
+    (the case the warning is for), and a legitimate JSON change since the twin
+    was written — every `--amend` or `--reopen` re-render trips it. Do not
+    reword this back into "the operator has edited...": that misattribution
+    trains operators to ignore the warning.
 
     `canonical_body` here is the freshly-rendered MD WITHOUT operator
     notes re-inserted — comparing this against the existing MD's
