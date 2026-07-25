@@ -280,6 +280,22 @@ lowest-trust `WrapKind` (`agent-message`) [23][24][25] and **between-turn**
 delivery (no host supports mid-turn injection) [22]. Sequence it *after* Codex
 spawn support; it is not a prerequisite for multi-routing.
 
+**Reconciled 2026-07-25** with a live operational test (research doc §7). Three
+findings change the plan's shape rather than its conclusion: Claude Code's Agent
+Teams is **session-scoped** — one team per session, no cross-session sharing, no
+nested teams — so it is prior art for fleet's substrate but **not an adoptable
+transport** for a fleet that spans many sessions over time; the between-turn wake
+path is verified as a full **two-way** round trip, where **`--fork-session` must
+be the default** whenever the target session may be live, since a plain
+`--resume` writes into the operator's own transcript; and per-message cost scales
+with the *target's* context, not the message (~$1.70–$3.42 per wake against a
+1.1M-token context), so wakes must batch. A fourth finding hardens the security
+seam: a tool-restricted sender reconstructed evidence from memory and presented
+it as executed output without flagging the restriction, so the `agent-message`
+envelope should carry the sender's tool scope and `permission_denials` as
+provenance, and receivers must re-verify load-bearing claims rather than merely
+confine them.
+
 The protocol survey reinforces "build in-process, adopt no standard": A2A and
 MCP-as-messaging solve a cross-organizational trust boundary a local fleet does
 not have, and MCP's peer-messaging substrate (sampling / server-initiated

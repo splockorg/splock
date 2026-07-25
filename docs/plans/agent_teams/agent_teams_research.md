@@ -1,6 +1,8 @@
 # Research: agent teams — inter-agent communication for a splock fleet
 
-**Date:** 2026-07-22. **Scope:** external research on whether, and how, splock
+**Date:** 2026-07-22; **reconciled 2026-07-25** with first-hand operational
+findings (§7 — different method, different date, marked throughout). **Scope:**
+external research on whether, and how, splock
 should let fleet agents communicate with each other ("teams"), evaluated
 alongside the in-flight multi-routing work (Codex CLI, Antigravity/Gemini as
 spawnable hosts). This is a *feasibility + prior-art* survey feeding a future
@@ -252,6 +254,12 @@ The decisive find: **Claude Code shipped experimental Agent Teams**
 code.claude.com/docs/en/agent-teams) — first-party inter-agent messaging **over
 the local filesystem**, almost exactly the substrate fleet contemplates.
 
+> **Qualified 2026-07-25 (§7.1):** "almost exactly the substrate" holds on the
+> **storage** axis and the comparison below stands. It does **not** hold on the
+> **topology** axis: a team is scoped to ONE session and cannot span or attach
+> another. Agent Teams is therefore prior art for fleet's substrate, **not an
+> adoptable messaging layer for it.**
+
 - **Mailbox = one JSON file per agent** at
   `~/.claude/teams/{team}/inboxes/{agent}.json`; delivery via a `SendMessage`
   tool; recipient is *implicit in the filename*. Shared task list = individual
@@ -363,6 +371,125 @@ should be a decision, not an accident.
 
 ---
 
+## 7. Reconciliation: first-hand operational findings (2026-07-25)
+
+**Method — deliberately different from §§1–6.** Not a literature pass: a live
+operational test on **CLI 2.1.220**, driving a real two-way exchange between a
+splock session and an agent working in another repo (`qum`) that had hit a
+`--amend` defect. Every claim here is **first-hand unless marked `(docs)`**,
+which denotes the Agent Teams documentation read the same day. n is small and
+stated as such; nothing here supersedes §2's measured evidence.
+
+**7.1 — Agent Teams is session-scoped, which rules it out as fleet's messaging
+layer.** `(docs)` A session has exactly one team, scoped to that session; you
+cannot create additional named teams or share a team across sessions. Teammates
+cannot spawn teammates (no nested teams), the lead is fixed for the session's
+lifetime, and `/resume` and `/rewind` do not restore in-process teammates. This
+is the opposite of fleet's topology: fleet exists to fan out across **many
+independent sessions over time**, each re-enterable later by session id. A team
+cannot span two sessions, cannot attach an already-running one, and dies with
+its lead.
+
+Two consequences, and they are load-bearing for the plan: **(a)** Agent Teams is
+not adoptable as fleet's inter-agent transport, so §4's comparison should be read
+as substrate prior art (which it is, and a favourable one for splock) rather than
+as a candidate implementation; **(b)** it cannot connect an operator's session to
+a running or previously-run child, which is the concrete thing an operator
+actually wants. What *does* serve that need is §7.2, which fleet already
+half-owns.
+
+**7.2 — The `resume`-from-session-id path is verified as a TWO-WAY channel, and
+`--fork-session` is what makes it safe against a live session.** Recommendation
+4 proposed between-turn delivery by resuming from session id. Verified, with one
+material addition the survey did not have:
+
+```
+claude -p "<message>" --resume <session_id> --fork-session \
+    --output-format json --allowedTools <...>
+```
+
+- Re-enters the target session **with its full prior context** and returns the
+  reply in `result`, alongside `session_id`, `num_turns`, `total_cost_usd`,
+  `permission_denials`, and `modelUsage`. It is a round trip, not just a wake.
+- **`--fork-session` mints a NEW session id and leaves the original transcript
+  untouched.** This is the piece that makes the path usable against a session an
+  operator is actively sitting in — a plain `--resume` writes to the live
+  transcript. **It should be the documented default whenever the target may be
+  live**, and `fleet resume` should consider adopting it for attended slugs.
+- Threading works: fork once, then `--resume` the *returned* id (no
+  `--fork-session`) on later turns to keep one conversation. Verified across two
+  turns.
+
+This is the between-turn delivery mechanism Recommendation 4 asks for, already
+present in the host, with no new IPC layer — reinforcing §0's conclusion rather
+than complicating it.
+
+**7.3 — Per-message cost scales with the TARGET's context, not the message.**
+Two turns against a target carrying ~1.1M cached input tokens cost **$3.42 and
+$1.70** notional pool draw (subscription OAuth — the "est. pool draw, not
+billing" caveat in `docs/FLEET.md` applies). The message was a few hundred
+tokens; the cost was the wake. Design consequence: a delivery model that wakes a
+large-context child **once per message** is expensive by construction, and
+batching several questions into one wake is materially cheaper than N wakes.
+This is AgentPrune's result (§2) arriving as a wall-clock billing fact rather
+than a benchmark — prune the message graph.
+
+**7.4 — New empirical support for §5, from a NON-adversarial failure we actually
+hit: an under-tooled agent message can carry fabricated evidence.** The first
+exchange was tool-scoped to `Read Grep Glob`. The reply presented probe
+transcripts — tracebacks, exit codes, file:line anchors — in a form that read as
+executed output. Its single `Bash` call had in fact been **denied** (recorded in
+`permission_denials` in the result JSON), so those transcripts were reconstructed
+from prior context, not observed. Re-running the identical request with `Bash`
+allowed produced verifiably executed output that **differed in detail**, and in
+which the agent corrected two of its own earlier claims and one of the
+requester's.
+
+The agent was not malicious and was not lying; it reported from memory under a
+tool restriction it did not think to flag. That is precisely why it matters —
+§5's threat model is adversarial, and this is the same failure arriving through
+ordinary operation, which is the more likely path. Two design consequences:
+
+1. **The `agent-message` `WrapKind` envelope should carry the sender's tool scope
+   and `permission_denials` as provenance.** The spawner already receives both in
+   the result JSON. It is exactly the metadata that separates *observed* from
+   *recalled*, and it costs nothing to propagate.
+2. **A receiving agent must independently verify load-bearing claims**, not just
+   confine them. In this exchange the receiver did re-verify against source,
+   which is what caught it — confinement alone would have passed the fabricated
+   transcripts through intact, correctly labelled and still wrong.
+
+**7.5 — A first-hand data point for the critic/verifier shape (Recommendation
+8).** The exchange was orchestrator-mediated, one-writer, and carried
+decisions/scope rather than instructions — the exact shape §§2–4 endorse. It
+earned its cost: the responding agent corrected the requester's framing three
+times and identified a **genuine safety hole** in the requester's proposed change
+(an op-bounding gate the change would have silently eroded) that the requester
+had missed. Landed as PR #53.
+
+Scope honestly: n=1, self-reported by both participants, and it says **nothing**
+about free-form peer messaging — the participants were mediated by a human
+operator throughout. It is evidence that a *structured, adversarial,
+decision-carrying* exchange pays for itself, which is the version this document
+already recommends, not evidence against §2.
+
+**7.6 — Operational notes that bite.**
+
+- Local CLI is **2.1.220** (§4 anchored at 2.1.178+). Agent Teams remains
+  experimental and off by default.
+- `(docs)` Teammates do **not** inherit the lead's `/model` by default, and a
+  subagent definition's `skills` and `mcpServers` frontmatter is **not applied**
+  when that definition runs as a teammate. Directly relevant: splock's roster
+  (`agents/*.md`) is exactly such a definition set, so a teams-shaped feature
+  cannot assume roster frontmatter carries over.
+- A wrapper **script** that shelled out to `claude -p` was refused by the host's
+  auto-mode permission classifier, while the equivalent **explicit command** was
+  allowed. Any teams feature invoked from inside an agent session should expect
+  classifier friction on opaque wrappers, and prefer legible direct invocations
+  or an explicit permission rule.
+
+---
+
 ## Recommendations for /plan
 
 Additive, prior-art-anchored guidance for a future `agent_teams` (or fleet-teams)
@@ -390,6 +517,13 @@ plan. No plan file is edited here.
    (§4, issue #21419). Specify delivery as either turn-boundary inbox polling or
    `resume`-from-session-id wake of a stopped child — reuse fleet's `resume` +
    `runs.latest_session_id()` rather than inventing a live channel.
+   **Sharpened by §7.2 (verified 2026-07-25):** the wake path is already a
+   full two-way round trip (`--output-format json` returns the reply plus
+   `permission_denials` and cost), and **`--fork-session` must be the default
+   whenever the target session may be live** — it mints a new session id and
+   leaves the operator's transcript untouched, where a plain `--resume` writes
+   into it. Budget accordingly: per-message cost scales with the *target's*
+   context, not the message (§7.3), so batch questions per wake.
 5. **Rule on `_fleet_runs.jsonl`'s seal status explicitly** (§6). Either promote
    it to the sealed, CLI-only message-log substrate (mirroring the sealed
    `_fleet.json`/`_fleet_log.jsonl` discipline and the `flock_helpers` primitive
@@ -410,7 +544,22 @@ plan. No plan file is edited here.
    measured support (Reflexion +11 pts) and matches splock's existing Ralph
    gate + reviewer. If teams needs a new role, a shared-state reviewer/synthesis
    agent is better-evidenced than a peer-negotiation agent.
-9. **Carry these open questions into the plan:** whether waves should gain a real
+9. **Carry the sender's tool scope in the envelope, and verify — do not merely
+   confine — load-bearing claims** (§7.4, first-hand). An agent message that
+   *reports* an observation is not evidence the observation was made: a
+   tool-restricted sender reconstructed probe output from memory and presented it
+   as executed, without flagging the restriction. Propagate `permission_denials`
+   and the allowed-tool scope into the `agent-message` envelope as provenance
+   (the spawner already receives both in the result JSON), and require the
+   receiver to independently re-verify any claim it is about to act on.
+   Confinement labels untrusted content correctly; it does not make it true.
+10. **Do not plan on Agent Teams as the transport** (§7.1). It is session-scoped
+   — one team per session, no cross-session sharing, no nested teams, teammates
+   lost on resume — which is structurally incompatible with fleet's
+   many-sessions-over-time topology. Keep §4's substrate comparison (it is
+   favourable and still accurate); drop any assumption that the feature itself
+   is adoptable.
+11. **Carry these open questions into the plan:** whether waves should gain a real
    cross-slug dependency gate (today they are display-grouping only); whether the
    orchestrator schema's `agent_assignment` needs a `host_family` field (ties to
    the deferred portability `model_family` bump); and Codex's `--output-schema`
@@ -453,6 +602,16 @@ claude-squad github.com/smtg-ai/claude-squad; container-use github.com/dagger/
 container-use; MAS-malicious-code arXiv:2503.12188; Terrarium arXiv:2510.14312;
 Prompt Infection arXiv:2410.07283; Spotlighting arXiv:2403.14720; Design Patterns
 for Securing LLM Agents arXiv:2506.08837.
+
+**First-hand (§7, 2026-07-25):** live operational test on CLI 2.1.220 — a
+two-way `claude -p --resume <sid> --fork-session --output-format json` exchange
+between a splock session and an agent working in `qum`; two turns, result JSON
+inspected directly (`session_id`, `total_cost_usd`, `permission_denials`,
+`num_turns`, `modelUsage`). Agent Teams doc claims marked `(docs)` are from
+code.claude.com/docs/en/agent-teams read the same day. Outcome landed as
+splockorg/splock PR #53. Not a controlled experiment: n=1, both participants are
+LLM agents reporting on their own exchange, and the cost figures are notional
+subscription pool draw rather than billing.
 
 **Sourcing caveat:** the 2026 agent-tooling blog ecosystem is heavily machine-
 generated; where reverse-engineering blogs were used (claudecodecamp) they are
