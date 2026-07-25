@@ -35,7 +35,7 @@
               "non_goal",
               "scalar"
             ],
-            "description": "Closed enum: which keyed collection / field family this op targets. success_criterion -> plan.success_criteria[]; task -> plan.tasks_skeleton[]; component -> plan.conceptual_architecture.components[]; reference -> plan.references[]; non_goal -> plan.non_goals[]; scalar -> a top-level scalar field (title/problem_statement/tier/...)."
+            "description": "Closed enum: which keyed collection / field family this op targets. success_criterion -> plan.success_criteria[]; task -> plan.tasks_skeleton[]; component -> plan.conceptual_architecture.components[]; reference -> plan.references[]; non_goal -> plan.non_goals[]; scalar -> a plan-root scalar field (title/problem_statement/tier/...) or an ALLOWLISTED nested scalar addressed by dotted path (see address.field); nested addressing is replace-only."
           },
           "action": {
             "type": "string",
@@ -74,7 +74,7 @@
               "field": {
                 "type": "string",
                 "minLength": 1,
-                "description": "Top-level field name for op_kind=scalar (e.g., 'title', 'problem_statement', 'tier'). Matches a scalar key on the plan root."
+                "description": "Field name for op_kind=scalar. Either a top-level field on the plan root (e.g., 'title', 'problem_statement', 'tier'), OR one of the ALLOWLISTED dotted nested-scalar paths -- currently 'conceptual_architecture.overview' alone, the one plan_v1 scalar that is neither a root key nor a keyed-collection entry. The allowlist is enforced at apply-time in patch_apply.py (NESTED_SCALAR_FIELDS) rather than by an in-schema enum/pattern, the same placement as address.index's >=0 bound and for the same reason: the constrained-decoding endpoint's restrictions on this schema. A dotted path is NOT a general resolver -- entries inside a keyed collection are addressed by their own op_kind (success_criterion/task/component/reference/non_goal), never by path."
               }
             }
           },
