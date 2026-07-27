@@ -57,13 +57,21 @@ fired without parsing morning-review.
 
 ## Side effects to be aware of
 
-- Appends a morning-review entry under `docs/plans/<slug>/morning-review/`
-  per §F append-only discipline. Operator-direct runs (chain-id starts
-  with `manual_`) are still logged.
-- May write `verification/<chain-id>/<phase>_<timestamp>.json` per
-  §A.impl.7 verification-artifact scheme.
-- The Sonnet reviewer's R1-R5 verdicts are written via the substrate;
-  the slash command does NOT need to surface them separately.
+Persistence is HALT-PATH ONLY — a green run (exit 0) writes no
+morning-review entry, so the absence of one is not evidence the run
+never executed. Where to look, by outcome:
+
+- **Green run (exit 0):** the durable receipts are the per-iteration
+  verify-output captures `docs/plans/<slug>/_test_output_iter<n>.txt`
+  (best-effort, written green or red) and — when the project has opted
+  into fleet tracking — the `_fleet_log.jsonl` rows. The reviewer's
+  per-iteration R1-R5 verdicts are NOT retained on green.
+- **Halt (exit 17):** appends a morning-review entry under
+  `docs/plans/<slug>/morning-review/` per §F append-only discipline,
+  with the full per-iteration R1-R5 record embedded. Operator-direct
+  runs (chain-id starts with `manual_`) are logged the same way.
+- Nothing on this path writes the §A.impl.7 `verification/` artifact
+  scheme (green or halt) — do not look for it.
 
 ## Fleet auto-tracking (opt-in)
 

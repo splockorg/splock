@@ -66,8 +66,23 @@ Check via Bash before invoking.
 
 ## Side effects
 
-- Reviewer verdict logged under `verification/` per §A.impl.7.
-- Morning-review entry appended on halt verdicts.
+Persistence is HALT-PATH ONLY — a green run (exit 0) leaves no artifact
+under the plan dir, so the absence of one is not evidence the review
+never ran:
+
+- **READY / NEEDS_REVISION (exit 0):** empty stdout + exit 0 is the
+  contract (callers depend on it — do not add green-path output). The
+  reviewer's R1-R5 reasoning is NOT retained; the only durable receipts
+  are the fleet `_fleet_log.jsonl` rows (`"<junction> review READY"`),
+  when the project has opted into fleet tracking.
+- **HALT / cap exhaustion (exit 10/17):** a morning-review entry is
+  appended under `docs/plans/<slug>/morning-review/` with the full
+  R1-R5 record and the briefing snapshot. (Exception: a PRE-exhausted
+  re-invocation exits 17 with a structured
+  `phase_boundary_pre_exhausted` stderr envelope and appends nothing —
+  reset via `--fresh`.)
+- Nothing on this path writes the §A.impl.7 `verification/` artifact
+  scheme — do not look for it.
 
 ## Fleet auto-tracking (opt-in)
 
@@ -76,7 +91,10 @@ fleet lifecycle tracker (`docs/plans/_fleet/_fleet_meta.json`
 exists — see `docs/FLEET.md`), `bin/verify boundary` records
 `review` / `✈️ wip` on start, `🕛 ready` with the junction's next
 command on READY (`plan_to_implplan` → `/implplan`,
-`implplan_to_code` → `/code`), and `❌ blocked` on a HALT verdict
+`implplan_to_code` → `/code` — reconciled against picker state: when
+the DAG is already ALL_DONE, the stamped next action is
+`bin/fleet close <slug>` instead of a `/code` pointer the picker would
+refuse with exit 23), and `❌ blocked` on a HALT verdict
 engine-side. On a project that has not opted in this is a no-op.
 
 ## Cross-references
