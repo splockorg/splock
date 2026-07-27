@@ -51,6 +51,19 @@ from . import briefing as briefing_mod, exit_codes, halt_handoff, rubric as rubr
 
 logger = logging.getLogger(__name__)
 
+#: `event_type` discriminators stamped on the STAGE-level transition rows the
+#: `bin/verify test-step` path emits. These rows carry `task_id: None` by
+#: contract (test-step has no task id in scope), so without a discriminator a
+#: log consumer cannot tell them apart from an unattributed task transition.
+#: `event_type` is payload-level and free-form per
+#: schemas/orchestrator_log_v1.schema.json StandardRow.event_type
+#: ("illustrative, not enforced; new event_types may be added by writers
+#: without schema bump") — no schema change needed. Matches the existing
+#: in-file convention (`pause_inject_consumed` below, `boundary_counter_reset`
+#: in main.py).
+EVENT_TYPE_TEST_STEP_STAGE = "test_step_stage_transition"
+EVENT_TYPE_TEST_STEP_HALT = "test_step_halt_deferral"
+
 
 # ----------------------------------------------------------------------
 # Closed-enum result + retry-counter source classifiers
@@ -984,14 +997,21 @@ def _emit_iteration_transition(
             f"{ctx.chain_id}|test_step|{ctx.iteration_n}".encode("utf-8")
         ).hexdigest()
         session_id = f"sess_{digest[:8]}"
-        # task_id per orchestrator_log_v1.schema.json must match ^T[0-9]+$
-        # or be null; the retry-loop emits null since "test_step" is the
-        # phase-level concept (not a per-task id).
+        # `task_id` is null BY CONTRACT, not by omission. `bin/verify
+        # test-step` is invoked as `test-step <slug> --chain-id <id>` and never
+        # receives a task id — "test_step" is a STAGE concept, the pre-flight
+        # reads a tests_enabled UNION across all tasks, and the unified counter
+        # uses the same pseudo-id (`task_id="test_step"`). Null is schema-legal
+        # (`TaskId` = `^T[A-Za-z0-9_-]+$` | null) and consumers already skip
+        # null-task rows before touching derived state
+        # (bin/_state_divergence/replay.py). NEVER fabricate an id here — the
+        # `event_type` discriminator below is what marks the row stage-level.
         row = {
             "session_id": session_id,
             "plan_slug": ctx.slug,
             "chain_id": ctx.chain_id,
             "task_id": None,
+            "event_type": EVENT_TYPE_TEST_STEP_STAGE,
             "transition": {"from": "wip", "to": transition_to},
             "pointer": None,
             "retry_count": ctx.iteration_n,
@@ -1006,6 +1026,8 @@ def _emit_iteration_transition(
 
 
 __all__ = [
+    "EVENT_TYPE_TEST_STEP_HALT",
+    "EVENT_TYPE_TEST_STEP_STAGE",
     "CounterSource",
     "IterationContext",
     "IterationRecord",

@@ -386,18 +386,27 @@ def _emit_deferral_row(
     from bin._jsonl_log import append_row
     import hashlib
 
+    # Function-local: iteration_loop imports THIS module, so a module-scope
+    # import back would cycle. Deferred to call time, matching the local
+    # imports above.
+    from .iteration_loop import EVENT_TYPE_TEST_STEP_HALT
+
     digest = hashlib.sha1(
         f"{chain_id}|halt_handoff|{halt_reason}".encode("utf-8")
     ).hexdigest()
     session_id = f"sess_{digest[:8]}"
-    # task_id per orchestrator_log_v1.schema.json must match ^T[0-9]+$ or
-    # be null. The retry-loop's halt event is task-level "test_step" but
-    # the JSONL row uses null and surfaces "halt_reason=..." in reason.
+    # `task_id` is null BY CONTRACT: the halt belongs to the test_step STAGE,
+    # which has no task id in scope (see EVENT_TYPE_TEST_STEP_STAGE in
+    # iteration_loop for the full rationale). Null is schema-legal
+    # (`TaskId` = `^T[A-Za-z0-9_-]+$` | null); the `event_type` discriminator
+    # is what marks the row stage-level so a reconciler does not read it as an
+    # unattributed task deferral. `halt_reason=...` rides in `reason`.
     row = {
         "session_id": session_id,
         "plan_slug": slug,
         "chain_id": chain_id,
         "task_id": None,
+        "event_type": EVENT_TYPE_TEST_STEP_HALT,
         "transition": {"from": "wip", "to": "deferred"},
         "pointer": None,
         "retry_count": iteration_count,
