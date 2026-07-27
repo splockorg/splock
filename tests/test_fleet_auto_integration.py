@@ -217,3 +217,58 @@ def test_retry_loop_boundary_junction_next(fleet_project, monkeypatch):
     assert (st["stage"], st["status"], st["next"]) == ("review", "ready", "/implplan")
     events = engine.load_all_events()
     assert events[-1]["note"] == "plan_to_implplan review READY"
+
+
+# ---------------------------------------------------------------------------
+# READY next-pointer reconciliation against picker state
+# ---------------------------------------------------------------------------
+
+
+def _write_dag(slug: str, statuses: dict[str, str]) -> None:
+    """Minimal orchestrator + `_state.json` pair for the picker surface."""
+    plan_dir = paths.plans_dir() / slug
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    (plan_dir / f"{slug}_orchestrator.json").write_text(
+        json.dumps({"tasks": [{"id": t, "depends_on": []} for t in statuses]}),
+        encoding="utf-8",
+    )
+    (plan_dir / "_state.json").write_text(
+        json.dumps({"tasks": {t: {"status": s} for t, s in statuses.items()}}),
+        encoding="utf-8",
+    )
+
+
+def _run_green_boundary(monkeypatch, boundary: str) -> None:
+    from bin._retry_loop import main as rl_main
+
+    monkeypatch.setattr(rl_main, "_PLANS_DIR", paths.plans_dir())
+    monkeypatch.setattr(rl_main, "_run_boundary", lambda args: 0)
+    ns = argparse.Namespace(subcommand="boundary", slug=SLUG,
+                            chain_id="manual_t", boundary=boundary)
+    assert rl_main._run_boundary_tracked(ns) == 0
+
+
+def test_boundary_ready_all_done_dag_points_at_closeout(fleet_project, monkeypatch):
+    """implplan_to_code READY on an ALL_DONE DAG must not stamp `/code` —
+    the picker would refuse it with exit 23 (stale-pointer field report,
+    2026-07-26). The reconciled next action is the closeout verb, and the
+    generated PROMPTS zone offers no spawn line for it."""
+    _write_dag(SLUG, {"T1": "done", "T2": "cancelled"})
+    _run_green_boundary(monkeypatch, "implplan_to_code")
+    st = engine.load_state(SLUG)
+    assert (st["status"], st["next"]) == ("ready", f"bin/fleet close {SLUG}")
+    hub_text = paths.hub_path(engine.load_meta()).read_text(encoding="utf-8")
+    assert f"bin/fleet spawn {SLUG}" not in hub_text
+
+
+def test_boundary_ready_live_dag_keeps_static_next(fleet_project, monkeypatch):
+    _write_dag(SLUG, {"T1": "done", "T2": "ready"})
+    _run_green_boundary(monkeypatch, "implplan_to_code")
+    assert engine.load_state(SLUG)["next"] == "/code"
+
+
+def test_boundary_ready_missing_dag_degrades_to_static_next(fleet_project, monkeypatch):
+    """No orchestrator on disk → the reconciliation degrades silently to
+    the static junction mapping (pointer refinement, never a gate)."""
+    _run_green_boundary(monkeypatch, "implplan_to_code")
+    assert engine.load_state(SLUG)["next"] == "/code"

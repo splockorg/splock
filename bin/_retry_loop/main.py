@@ -330,11 +330,42 @@ def _run_test_step_tracked(args: argparse.Namespace) -> int:
     return rc
 
 
+def _boundary_next_action(slug: str, boundary: str) -> str | None:
+    """Reconcile the junction's static next command against picker state.
+
+    `implplan_to_code` → `/code` is stale exactly when the DAG is already
+    ALL_DONE: `/code` would refuse via the picker (exit 23), so the
+    pointer sends the operator in a circle at the moment a chain
+    finishes. Run the same `compute_ready_set` surface the live picker
+    uses; on `all_done` the next action is closeout. Any load/compute
+    failure degrades to the static mapping — this refines a pointer,
+    never gates the review.
+    """
+    default = fleet_auto.BOUNDARY_NEXT.get(boundary)
+    if boundary != "implplan_to_code":
+        return default
+    try:
+        from bin._orchestrator_query.orchestrator_loader import load_orchestrator
+        from bin._orchestrator_query.query import compute_ready_set
+        from bin._orchestrator_query.state_loader import load_state
+
+        plan_dir = _PLANS_DIR / slug
+        report = compute_ready_set(
+            load_orchestrator(plan_dir, slug), load_state(plan_dir)
+        )
+    except Exception:  # noqa: BLE001 — pointer refinement, never a gate
+        return default
+    if report.verdict == "all_done":
+        return f"bin/fleet close {slug}"
+    return default
+
+
 def _run_boundary_tracked(args: argparse.Namespace) -> int:
     """`_run_boundary` + fleet auto-integration (docs/FLEET.md).
 
     The next action follows from the junction the review cleared
-    (`plan_to_implplan` → /implplan, `implplan_to_code` → /code).
+    (`plan_to_implplan` → /implplan, `implplan_to_code` → /code),
+    reconciled against picker state (`_boundary_next_action`).
     """
     fleet_auto.stage_started(
         args.slug, "review", actor="retry-loop",
@@ -344,7 +375,7 @@ def _run_boundary_tracked(args: argparse.Namespace) -> int:
     if rc == exit_codes.EXIT_OK:
         fleet_auto.stage_finished(
             args.slug, "review", actor="retry-loop",
-            next_action=fleet_auto.BOUNDARY_NEXT.get(args.boundary),
+            next_action=_boundary_next_action(args.slug, args.boundary),
             note=f"{args.boundary} review READY",
         )
     elif rc in (exit_codes.EXIT_RETRY_EXCEEDED, exit_codes.EXIT_PHASE_BOUNDARY_HALT):
