@@ -49,3 +49,7 @@ settings.local.json
 .vscode/
 *.swp
 *~
+
+# --- Slug-registry runtime residue (never tracked in this repo) ---
+docs/plans/**/*_orchestrator_log.jsonl
+docs/plans/**/*.lock
