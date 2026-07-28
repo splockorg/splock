@@ -256,6 +256,24 @@ def test_render_prompts_unspawnable_next_and_empty_placeholder(fleet_project):
     assert "bin/fleet spawn alpha" not in body
 
 
+def test_render_prompts_surfaces_arguments_the_one_liner_drops(fleet_project):
+    """Relaxing the parse must not silently swallow a decorated `next`.
+
+    The one-liner is built from the stage token alone, so anything the
+    operator wrote after it would vanish from the zone. It is rendered
+    beside the line instead, labelled as NOT passed by the command.
+    """
+    _mk_slug("alpha", stage="qa", status="ready",
+             next_action="/review alpha plan_to_implplan")
+    _mk_slug("bare", stage="qa", status="ready", next_action="/review")
+    body = engine.render_zones()["prompts"]
+    assert "- `bin/fleet spawn alpha --stage review`" in body
+    assert "does NOT pass it): alpha plan_to_implplan" in body
+    # a bare token has no remainder, so it gets no annotation
+    assert "- `bin/fleet spawn bare --stage review`" in body
+    assert len([l for l in body.splitlines() if "does NOT pass it" in l]) == 1
+
+
 def test_render_prompts_directive_display_clamped(fleet_project):
     _mk_slug("alpha", stage="qa", status="ready", next_action="/plan",
              spawn_directive="x" * 5000)

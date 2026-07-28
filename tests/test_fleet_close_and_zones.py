@@ -200,6 +200,27 @@ def test_prompts_skips_and_attended_picks_up(attended_project):
         in attended
 
 
+def test_decorated_next_still_routes_to_attended(attended_project):
+    """A `next` carrying arguments must not fall out of BOTH lanes.
+
+    Regression (observed 2026-07-28): the parse was end-anchored, so
+    "/code <slug> --resume" returned None — and None is not in the
+    deny-list, which admitted the slug to PROMPTS (where it printed as
+    un-runnable) AND dropped it from ATTENDED. The hub rendered
+    "Nothing queued for attended work" while a ready slug sat in it.
+    Both halves failed silently: a plausible row rendered either way.
+    """
+    engine.update(SLUG, stage="implplan", status="ready",
+                  next_action=f"/code {SLUG} --resume T1", actor="t")
+    states, meta = engine.load_all_states(), engine.load_meta()
+    assert engine.next_stage_token(states[SLUG]) == "code"
+    attended = engine.render_attended(states, meta)
+    assert f"`/splock:code {SLUG}`" in attended   # filed in the right lane
+    assert "--resume T1" in attended              # arguments not lost
+    # and it must NOT also be offered as a headless one-liner
+    assert f"spawn {SLUG}" not in engine.render_prompts(states, meta)
+
+
 def test_attended_orders_by_slot_then_wave(attended_project):
     for i, name in enumerate(("zz_later", "aa_unslotted")):
         (paths.plans_dir() / name).mkdir()

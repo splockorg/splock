@@ -280,10 +280,22 @@ def render_now(states: dict[str, dict], meta: dict) -> str:
     return "\n".join(rows)
 
 
-#: `next` values that map to a runnable spawn one-liner: a single stage
-#: command token ("/qa", "/plan", installed-plugin "/splock:code", …).
-#: Anything else ("closeout", "—", free prose) is not spawnable.
-_SPAWNABLE_NEXT = re.compile(r"^/(?:splock:)?([a-z][a-z0-9_]*)$")
+#: `next` values that map to a runnable spawn one-liner: the FIRST
+#: whitespace-separated token must be a stage command ("/qa", "/plan",
+#: installed-plugin "/splock:code", …). Anything without that leading
+#: token ("closeout", "—", free prose) is not spawnable.
+#:
+#: Trailing arguments and prose are TOLERATED ("/plan <slug> --reopen").
+#: They used to defeat an end-anchored match, which returned None — and
+#: None is not in the attended deny-list, so a decorated `next` was
+#: mis-filed in BOTH directions at once: admitted to the PROMPTS zone
+#: (where it printed as un-runnable) and excluded from the ATTENDED zone
+#: (where it belonged). Observed 2026-07-28 with the ATTENDED zone
+#: rendering "Nothing queued for attended work" while a ready slug sat
+#: in it. Both failure modes were silent — a plausible row rendered
+#: either way. PROMPTS surfaces any dropped remainder beside the
+#: one-liner so relaxing this cannot hide an argument the operator wrote.
+_SPAWNABLE_NEXT = re.compile(r"^/(?:splock:)?([a-z][a-z0-9_]*)(?=\s|$)")
 
 #: Display clamp for stored directives in the prompt bay. The state file
 #: keeps the full text (`bin/fleet state <slug>`); the zone stays readable.
@@ -312,9 +324,25 @@ def unspawnable_stages(meta: dict) -> set[str]:
 
 
 def next_stage_token(state: dict) -> str | None:
-    """The bare stage token in `next` (`/qa` → `qa`), else None."""
+    """The leading stage token in `next` (`/qa` → `qa`), else None.
+
+    Reads the FIRST whitespace-separated token, so a decorated value
+    (`/plan <slug> --reopen`) still routes to its real lane.
+    """
     m = _SPAWNABLE_NEXT.match((state.get("next") or "").strip())
     return m.group(1) if m else None
+
+
+def next_stage_remainder(state: dict) -> str:
+    """Whatever `next` carries after the leading stage token.
+
+    The spawn one-liner is built from the token alone, so the remainder
+    would silently vanish from the PROMPTS zone; callers render it beside
+    the line instead.
+    """
+    text = (state.get("next") or "").strip()
+    m = _SPAWNABLE_NEXT.match(text)
+    return text[m.end():].strip() if m else ""
 
 
 def render_prompts(states: dict[str, dict], meta: dict) -> str:
@@ -359,6 +387,10 @@ def render_prompts(states: dict[str, dict], meta: dict) -> str:
             m = _SPAWNABLE_NEXT.match((st.get("next") or "").strip())
             if m:
                 lines.append(f"- `bin/fleet spawn {s} --stage {m.group(1)}`")
+                rest = next_stage_remainder(st)
+                if rest:
+                    lines.append(f"  - next also carries (the one-liner "
+                                 f"does NOT pass it): {rest}")
             else:
                 lines.append(f"- `{s}` — next: {st.get('next') or '—'} "
                              "(not a stage command — run by hand)")
