@@ -123,12 +123,53 @@ Open shape:
 three candidate shapes have materially different blast radii, so no task is
 writable today. Tracked in VISION §16.14.
 
+## OI-6 — splock's own outstanding ledger sits outside its own sealed inventory (2026-07-29)
+
+`hooks/sealed_paths.txt` seals the deferred-work ledger at
+**`docs/outstanding_issues.md`**, so in an adopter repo `bin/route_issue` is the
+sole writer and a raw agent edit is denied at the `PreToolUse` boundary. splock
+keeps its own ledger at the repo **root** — `outstanding_issues.md` — which
+matches no sealed glob.
+
+**Consequence:** in this repo an agent can hand-edit the ledger that is supposed
+to be CLI-only. That is not hypothetical — `OI-4`, `OI-5`, and this entry were
+all written with a raw editor, which an adopter would have been refused for.
+Same family as the empty marker registry: **splock governs its adopters more
+strictly than it governs itself** (VISION §4.15).
+
+**Not fixed here, deliberately.** The fix is a one-line edit to
+`hooks/sealed_paths.txt` — and `hooks/**` is itself sealed (VISION §4.10: the
+agent may never edit splock's own plumbing, and the hooks that constrain an
+agent are exactly what it must not rewrite). An agent closing this issue by
+editing the seal list would be a live demonstration of why the seal exists. It
+needs an operator, or FO-1's sanctioned privileged path once that ships.
+
+**Candidate resolutions** (operator's call):
+
+1. **Move the ledger** to `docs/outstanding_issues.md`, matching the sealed glob
+   and the adopter convention. Cheapest, and makes splock's layout match what it
+   tells adopters to do. Costs: a path change in anything that references it.
+2. **Add the root spelling** to the sealed inventory, accepting two legal
+   locations. Cheaper still, but leaves splock's own layout diverging from the
+   convention it ships.
+3. **Seal by basename** rather than path. Broadest; risks over-sealing an
+   adopter's unrelated file of the same name — though per the inventory's own
+   comment, over-sealing is the safe direction.
+
+Option 1 is the recommendation: one location, one convention, no special case.
+
+**Related:** the same "shipped for adopters, unused here" pattern covers the
+empty `docs/plans/scheduled_markers/list.md` and `prefix_registry.md` — tracked
+in `docs/IMPLEMENTATION_STATUS.md` under *Partially built*.
+
 ---
 
-## Documentation defect found alongside OI-4/OI-5 (VISION §4.14 class) — README stage table
+## Documentation defect found alongside OI-4/OI-5 (VISION §4.14 class) — README stage table — ✅ FIXED 2026-07-29
 
-`README.md`'s stage table lists `/wrap` as a lifecycle stage. There is no
+`README.md`'s stage table listed `/wrap` as a lifecycle stage. There is no
 `commands/wrap.md`, and `bin/wrap` is not a closeout stage — it is an
-input-sanitization boundary. `VISION.md` §5 carried the same error and has been
-corrected to end the lifecycle at `close`, describing `wrap` and `close` as
-unrelated non-stage mechanisms. **README.md still needs the same correction.**
+input-sanitization boundary. `VISION.md` §5 carried the same error.
+
+**Both corrected 2026-07-29.** The README stage table now ends at `/eli5` and
+carries a separate table for the two non-stage mechanisms (`bin/wrap`,
+`bin/fleet close`), stated as unrelated to each other. `VISION.md` §5 matches.

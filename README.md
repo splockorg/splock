@@ -57,7 +57,15 @@ splock ships a set of slash commands and the subagents and skills behind them:
 | Test | `/test` | Run the enabled test set across the plan / at a phase gate. |
 | Review | `/review` | Sonnet-class review at phase boundaries. |
 | QA | `/qa` | Adversarial review of a plan or an implementation. |
-| Wrap | `/wrap` | Fold an exploratory artifact into the plan record. |
+| ELI5 | `/eli5` | Re-express existing material in plainspeak, adding nothing. |
+
+Two further mechanisms sit alongside the stages rather than in the sequence.
+Neither is a slash command, and they are unrelated to each other:
+
+| Mechanism | Surface | What it does |
+|---|---|---|
+| Wrap | `bin/wrap` | Wraps external content (recon / research / qna / qa / lessons findings, operator directives) in a canonical delimiter pair over a closed kind enum, so content the agent merely *read* enters the plan record as data rather than instruction. |
+| Close | `bin/fleet close` | The atomic terminal transition of a slug: final event + archive + meta reconcile + successor mint + one render. |
 
 The two-call planner separates free-form reasoning (call 1) from constrained,
 schema-valid JSON emission (call 2). The completion gate ("Ralph gate") runs
@@ -171,6 +179,9 @@ built-in default at the call site.
 
 | Doc | What's in it |
 |---|---|
+| [docs/VISION.md](docs/VISION.md) | **First-principles reference.** Intent, invariants, and drift guards — every plan, prompt, schema, hook, and code change must be traceable to a clause in it. |
+| [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) | **Repo facts.** What is built, partially built, and not built. Check here before treating a vision clause as evidence a subsystem exists. |
+| [AGENTS.md](AGENTS.md) | Standing directives for agentic assistants working in this repo. |
 | [DESIGN.md](DESIGN.md) | Architecture and design rationale — what splock is and how it works. |
 | [ADOPTION.md](ADOPTION.md) | Adopter quickstart: install, configure, the full `SPLOCK_*` env interface, the adoption smoke checks. |
 | [docs/SPEC_v2.7.md](docs/SPEC_v2.7.md) | The framework design specification (sanitized, repo-agnostic). |
