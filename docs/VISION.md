@@ -184,8 +184,10 @@ Stages produce durable artifacts, not chat: a recon report, a Q&A log, a sealed
 plan substrate plus its Markdown twin, an orchestrator DAG, a verdict, a
 closeout. The record survives the session.
 
-**Two mechanisms sit alongside the stages rather than in the sequence.** Both
-are load-bearing, and neither is a stage:
+**Two mechanisms sit alongside the stages rather than in the sequence.** They
+are load-bearing, neither is a stage, and — despite being described together
+here — **they have nothing to do with each other.** One guards the entrance to
+the plan record; the other performs the exit:
 
 - **wrap** is the trust boundary for content entering the plan record. Findings
   from recon, research, qna, qa, and lessons — and operator directives — are
@@ -195,8 +197,9 @@ are load-bearing, and neither is a stage:
 - **close** is the terminal transition of a slug: final event, archive, meta
   reconcile, successor mint, and one render — atomically, or not at all.
 
-Both ship as CLIs and neither has an agent-facing surface today. §16.13 records
-that gap.
+Both ship as CLIs and neither has an agent-facing surface today — the only trait
+they share. They are tracked separately, because they want opposite resolutions:
+§16.13 / `OI-4` for `wrap`, §16.14 / `OI-5` for `close`.
 
 **One vocabulary.** Three similarly-shaped names have three disjoint jobs, and
 they mean the same thing in this document, in the commands, in the agents, and
@@ -799,14 +802,20 @@ Direct consequences of §4:
     stream) flow back.
 12. **Repo history / identity decision (`OI-2`)** — the frozen single-commit
     hygiene tests versus ordinary local development.
-13. **Agent surfaces for `wrap` and `close` (§5).** Both ship as CLIs with no
-    agent-facing surface, so the two moments that bracket a slug — folding
-    findings into the plan record, and closing the slug out — are the two the
-    lifecycle does not drive. Open: whether closeout becomes a stage command, a
-    subagent, or an automatic consequence of the terminal transition; and
-    whether `wrap` should ever be agent-invoked at all, given that it is a trust
-    boundary and the agent is the party it is bounding. Recorded as `OI-4`.
-14. **What "fleet on by default" costs a single-slug adopter (§13).** fleet is
+13. **`wrap` invocation authority (§5).** Not "does it need an agent surface"
+    but *may it have one*: `wrap` is a trust boundary and the agent is the party
+    it bounds, so an agent that chooses when to wrap its own input can choose
+    not to. The competing resolution is that the ingesting engine wraps and the
+    agent never does — making the fix a call-site audit rather than a surface.
+    Recorded as `OI-4`.
+14. **Closeout has no agent surface (§5).** `bin/fleet close` works and nothing
+    drives it, so the last act of the lifecycle is the one act the lifecycle
+    does not perform. Open: stage command, subagent, or automatic consequence of
+    the final task going terminal — the automatic option being both the most
+    consistent with §10 and the most dangerous, since it requires a per-slug
+    "actually finished" judgment the gate only makes per task. Recorded as
+    `OI-5`. **Unrelated to §16.13** beyond both being CLIs without a surface.
+15. **What "fleet on by default" costs a single-slug adopter (§13).** fleet is
     opt-in today (`bin/fleet init` writes `_fleet_meta.json`); the §13 stance
     inverts that. Open: whether an adopter with one slug should carry hub and
     per-slug state from install, or whether fleet should self-activate on the

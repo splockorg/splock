@@ -65,39 +65,70 @@ follow-up ("audit remaining `parents[2]` users") should fold in F2/F3 and
 add a plugin-mode regression test (run each CLI from a foreign cwd with
 only `$CLAUDE_PROJECT_DIR` set).
 
-## OI-4 — `wrap` and `close` have no agent-facing surface; the lifecycle does not drive its own brackets (2026-07-29, found while writing `docs/VISION.md`)
+## OI-4 — `wrap` invocation authority is undecided: should the wrapped party ever call the wrapper? (2026-07-29, found while writing `docs/VISION.md`)
 
-The two moments that bracket a slug are the two the lifecycle does not drive.
-Both ship as working CLIs with no command, subagent, or skill surface:
+`bin/wrap` wraps external content in a canonical delimiter pair over the closed
+`WrapKind` enum (`recon-findings`, `qa-findings`, `qna-findings`,
+`research-findings`, `call1-reasoning`, `lessons-findings`, `operator-directive`,
+`eli5-subject`). It is the **trust boundary for content entering the plan
+record** — the mechanism that keeps content an agent merely read as data rather
+than instruction. It ships as a CLI with no command, subagent, or skill surface.
 
-- **`bin/wrap`** — wraps external content in a canonical delimiter pair over the
-  closed `WrapKind` enum (`recon-findings`, `qa-findings`, `qna-findings`,
-  `research-findings`, `call1-reasoning`, `lessons-findings`,
-  `operator-directive`, `eli5-subject`). This is the trust boundary for content
-  entering the plan record — the mechanism that keeps read content data rather
-  than instruction.
-- **`bin/fleet close`** — the atomic terminal transition: final event + archive
-  + meta reconcile + successor mint + one render.
+The open question is not "does it need an agent surface" — it is whether it may
+have one:
 
-**Documentation defect found alongside it (VISION §4.14 class):** `README.md`'s
-stage table lists `/wrap` as a lifecycle stage. There is no `commands/wrap.md`,
-and `bin/wrap` is not a closeout stage — it is an input-sanitization boundary.
-The vision's §5 lifecycle diagram carried the same error and has been corrected
-to end at `close`, with `wrap` and `close` described as mechanisms alongside the
-sequence rather than stages in it. **README.md still needs the same correction.**
+- `wrap` bounds the agent, and **the agent is the party it bounds.** An agent
+  that can choose when to wrap its own input can choose not to. That is the
+  structure VISION §4.1 exists to refuse.
+- The safer reading is that `wrap` should be invoked **by the ingesting engine**,
+  never by the agent supplying the content — in which case the correct fix is not
+  an agent surface at all but a **call-site audit**: every path where external
+  content reaches the planner should wrap it deterministically, and any path
+  where an agent hands over already-wrapped content is a hole.
 
-**Why this is `outstanding` and not a marker or a slug** (VISION §9): it fails
-the marker test — there is no named prerequisite; nothing blocks this work. It
-fails the "write a task for it today" test too, because the shape is genuinely
-undecided:
+**Why this is `outstanding` and not a marker or a slug** (VISION §9): nothing
+blocks it, so there is no prerequisite to name — it fails the marker test. And
+no task can be written today, because the two candidate resolutions (agent
+surface vs. call-site audit) point in opposite directions and the audit has not
+been done. Tracked in VISION §16.13.
 
-- Should closeout be a stage command (`/close`), a subagent, or an automatic
-  consequence of the terminal transition already firing?
-- Should `wrap` be agent-invoked **at all**? It is a trust boundary, and the
-  agent is the party it bounds — an agent that can choose when to wrap its own
-  input can choose not to. The safer reading is that `wrap` should be invoked
-  *by the ingesting engine*, never by the agent supplying the content, in which
-  case the correct fix is not an agent surface but a call-site audit.
+**Related but separate:** `OI-5` covers slug closeout. The two were filed
+together on 2026-07-29 and split the same day — they share only "CLI with no
+agent surface", they sit at opposite ends of the lifecycle, and they want
+opposite resolutions.
 
-That second question is the uncertain one, and it is why this sits here rather
-than in a plan. Tracked in VISION §16.13.
+## OI-5 — slug closeout has no agent-facing surface; the lifecycle does not drive its own terminal transition (2026-07-29, found while writing `docs/VISION.md`)
+
+`bin/fleet close` performs the atomic terminal transition of a slug: final event
++ archive + meta reconcile + successor mint + one render, or none of it. It works
+and it is concurrency-safe. It has no command, subagent, or skill surface, so
+**the last act of the lifecycle is the one act the lifecycle does not perform** —
+an operator runs it by hand, or it does not happen.
+
+That asymmetry is the defect. Every other stage records its own state
+transitions automatically (VISION §10, "running the lifecycle *is* the
+bookkeeping"); closeout is the exception, which makes a finished slug's terminal
+state depend on a human remembering.
+
+Open shape:
+
+- Should closeout be a stage command (`/close`), a subagent, or an **automatic
+  consequence** of the last task reaching a terminal state?
+- The automatic option is the most consistent with §10 and the most dangerous —
+  a closeout that fires on its own must be certain the slug is actually finished,
+  and "actually finished" is the judgment the completion gate makes per task, not
+  per slug.
+
+**Why this is `outstanding`** (VISION §9): no prerequisite blocks it, and the
+three candidate shapes have materially different blast radii, so no task is
+writable today. Tracked in VISION §16.14.
+
+---
+
+## Documentation defect found alongside OI-4/OI-5 (VISION §4.14 class) — README stage table
+
+`README.md`'s stage table lists `/wrap` as a lifecycle stage. There is no
+`commands/wrap.md`, and `bin/wrap` is not a closeout stage — it is an
+input-sanitization boundary. `VISION.md` §5 carried the same error and has been
+corrected to end the lifecycle at `close`, describing `wrap` and `close` as
+unrelated non-stage mechanisms. **README.md still needs the same correction.**
