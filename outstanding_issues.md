@@ -64,3 +64,40 @@ decision. F2/F3 are the same adopter-root class OI-1 fixed; the OI-1
 follow-up ("audit remaining `parents[2]` users") should fold in F2/F3 and
 add a plugin-mode regression test (run each CLI from a foreign cwd with
 only `$CLAUDE_PROJECT_DIR` set).
+
+## OI-4 — `wrap` and `close` have no agent-facing surface; the lifecycle does not drive its own brackets (2026-07-29, found while writing `docs/VISION.md`)
+
+The two moments that bracket a slug are the two the lifecycle does not drive.
+Both ship as working CLIs with no command, subagent, or skill surface:
+
+- **`bin/wrap`** — wraps external content in a canonical delimiter pair over the
+  closed `WrapKind` enum (`recon-findings`, `qa-findings`, `qna-findings`,
+  `research-findings`, `call1-reasoning`, `lessons-findings`,
+  `operator-directive`, `eli5-subject`). This is the trust boundary for content
+  entering the plan record — the mechanism that keeps read content data rather
+  than instruction.
+- **`bin/fleet close`** — the atomic terminal transition: final event + archive
+  + meta reconcile + successor mint + one render.
+
+**Documentation defect found alongside it (VISION §4.14 class):** `README.md`'s
+stage table lists `/wrap` as a lifecycle stage. There is no `commands/wrap.md`,
+and `bin/wrap` is not a closeout stage — it is an input-sanitization boundary.
+The vision's §5 lifecycle diagram carried the same error and has been corrected
+to end at `close`, with `wrap` and `close` described as mechanisms alongside the
+sequence rather than stages in it. **README.md still needs the same correction.**
+
+**Why this is `outstanding` and not a marker or a slug** (VISION §9): it fails
+the marker test — there is no named prerequisite; nothing blocks this work. It
+fails the "write a task for it today" test too, because the shape is genuinely
+undecided:
+
+- Should closeout be a stage command (`/close`), a subagent, or an automatic
+  consequence of the terminal transition already firing?
+- Should `wrap` be agent-invoked **at all**? It is a trust boundary, and the
+  agent is the party it bounds — an agent that can choose when to wrap its own
+  input can choose not to. The safer reading is that `wrap` should be invoked
+  *by the ingesting engine*, never by the agent supplying the content, in which
+  case the correct fix is not an agent surface but a call-site audit.
+
+That second question is the uncertain one, and it is why this sits here rather
+than in a plan. Tracked in VISION §16.13.
