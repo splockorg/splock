@@ -84,13 +84,15 @@ not put them in `.splock.toml`. There is intentionally no `.env.example`
 shipped — the complete environment-variable interface is documented in
 Section 4 below, which is the authoritative reference.
 
-### MySQL MCP for `/qna`
+### MySQL MCP for `/qna` and `/recon`
 
-The `qna` subagent's tool surface includes `mcp__mysql` — a
-server-level grant of every tool from an MCP server named `mysql`. To
-activate it, configure such a server in the adopting project's
-`.mcp.json`. Any MySQL MCP server implementation works; the only
-contract is the server *name*:
+The `qna` and `recon` subagents' tool surfaces include `mcp__mysql` — a
+server-level grant of every tool from an MCP server named `mysql`
+(qna: operator-question investigation; recon: live-schema evidence when
+the DDL is not in the tree — recon has no Bash, so this is its only
+database lane). To activate it, configure such a server in the adopting
+project's `.mcp.json`. Any MySQL MCP server implementation works; the
+only contract is the server *name*:
 
 ```json
 {
@@ -124,8 +126,8 @@ Two hard requirements:
 Bash-tier hooks (`safe-ddl` and friends) never see MCP calls, so the
 MCP lane carries its own deterministic guard (VISION §4.1, §4.9):
 
-- **Spawn gate** — `/qna` runs `bin/mysql-mcp-guard probe` before
-  spawning the subagent. The probe runs `SHOW GRANTS FOR
+- **Spawn gate** — `/qna` and `/recon` run `bin/mysql-mcp-guard probe`
+  before spawning the subagent. The probe runs `SHOW GRANTS FOR
   CURRENT_USER()` through your own `mysql`/`mariadb` client and grades
   the result against a closed read allowlist (`USAGE`, `SELECT`,
   `SHOW VIEW`, `SHOW DATABASES`, `PROCESS`). A write-capable credential
@@ -178,7 +180,7 @@ provides.
 | `SPLOCK_INTENT_AREA` | Pre-set the intent "area" string, taking precedence over the `--area` CLI flag. | unset | free string |
 | `SPLOCK_INTENT_SUMMARY` | Pre-set the intent summary string, taking precedence over the `--summary` CLI flag. | unset | free string |
 | `SPLOCK_SEALED_PATHS_FILE` | Override the path to the sealed-paths inventory file. | unset → `hooks/sealed_paths.txt` | a file path |
-| `SPLOCK_MYSQL_MCP_GUARD` | Read-only gate on the `mysql` MCP surface (§3 "MySQL MCP for `/qna`"): statement filter + `SHOW GRANTS` credential probe. | `halt` | `halt`, `warn`, `off` |
+| `SPLOCK_MYSQL_MCP_GUARD` | Read-only gate on the `mysql` MCP surface (§3 "MySQL MCP for `/qna` and `/recon`"): statement filter + `SHOW GRANTS` credential probe. | `halt` | `halt`, `warn`, `off` |
 
 ### 4.2 Chain-context variables (set by the driver — you normally do not set these)
 

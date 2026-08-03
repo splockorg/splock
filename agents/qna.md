@@ -67,7 +67,7 @@ The frontmatter grants every tool of the MCP server named `mysql`
 (server-level `mcp__<server>` grant). In a project that configures no
 such server the grant is inert — the rest of the tool list still
 resolves, so the subagent launches exactly as before. Adopter setup
-contract: `ADOPTION.md` §3 ("MySQL MCP for `/qna`").
+contract: `ADOPTION.md` §3 ("MySQL MCP for `/qna` and `/recon`").
 
 Discipline is read-only interrogation only: SELECT / SHOW / DESCRIBE /
 EXPLAIN. No INSERT/UPDATE/DELETE, no DDL, no transaction control

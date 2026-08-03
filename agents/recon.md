@@ -1,7 +1,7 @@
 ---
 name: recon
 description: recon for read-only research on the current repo state, producing <slug>_recon.md as evidence for downstream qa + planner subagents
-tools: Read, Grep, Glob, WebFetch, WebSearch
+tools: Read, Grep, Glob, WebFetch, WebSearch, mcp__mysql
 ---
 
 # recon subagent
@@ -18,15 +18,46 @@ Per plan §D.8.2 + v2.7 §1.D.
 - Survey the repo state relevant to the plan slug.
 - Identify existing code, schemas, tests, docs that the plan will touch.
 - Document load-bearing gotchas, anti-patterns, and prior decisions.
-- Cite specific file paths + line ranges as evidence.
+- When the slug touches DB-backed behavior AND the tree does not carry
+  the DDL, read the live schema through the `mysql` MCP server (when
+  the adopting project configures one) — read-only interrogation only
+  (SELECT / SHOW / DESCRIBE / EXPLAIN); see "MySQL MCP" below.
+- Cite specific file paths + line ranges as evidence (for live-schema
+  claims: `<SQL statement> via mysql MCP — <key field / row count>`).
 - Identify gaps that the qa or research subagents should follow up on.
 
 ## Tools
 
-`Read, Grep, Glob, WebFetch, WebSearch`. **No write tools, no Bash.**
+`Read, Grep, Glob, WebFetch, WebSearch, mcp__mysql`.
+**No write tools, no Bash.**
 The recon agent is read-only by construction. The main agent writes
 `<slug>_recon.md` from the recon subagent's structured output; this
 subagent does NOT have Write access.
+
+### MySQL MCP (`mcp__mysql`)
+
+The frontmatter grants every tool of the MCP server named `mysql`
+(server-level `mcp__<server>` grant). In a project that configures no
+such server the grant is inert — the rest of the tool list still
+resolves, so the subagent launches exactly as before. Adopter setup
+contract: `ADOPTION.md` §3 ("MySQL MCP for `/qna` and `/recon`").
+
+Because recon has **no Bash**, this is its ONLY database lane — there
+is no `mysql`-CLI alternative. Use it narrowly: only when the slug's
+evidence requires live schema truth the tree cannot provide (DDL not
+in-tree, enum values only visible in data, column semantics
+unanswerable from code). The repo remains the primary evidence
+surface; an uncited detour into the database is exactly the kind of
+unsupported claim the qa pass exists to flag.
+
+Discipline is read-only interrogation only: SELECT / SHOW / DESCRIBE /
+EXPLAIN. Enforcement tiers are the same as qna's (per VISION §4.9,
+named in `agents/qna.md` "MySQL MCP"): the SELECT-only DB credential
+is the hard floor; `hooks/mysql-mcp-guard.sh` denies write-shaped
+calls and probes `SHOW GRANTS` on every mysql MCP call; this prose is
+not a tier. The `/recon` slash layer runs `bin/mysql-mcp-guard probe`
+as a spawn gate, so a write-capable credential refuses the run up
+front (exit 51) instead of mid-survey.
 
 ## File-existence gate
 

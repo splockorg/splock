@@ -28,7 +28,7 @@ from bin._mysql_mcp_guard import statement
 
 _FIX_HINT = (
     " Fix: narrow the mysql MCP server's DB user to SELECT/SHOW VIEW "
-    "(see ADOPTION.md 'MySQL MCP for /qna'), or downgrade with "
+    "(see ADOPTION.md 'MySQL MCP for /qna and /recon'), or downgrade with "
     "SPLOCK_MYSQL_MCP_GUARD=warn (not recommended)."
 )
 

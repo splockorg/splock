@@ -86,6 +86,21 @@ Bash dir-existence check before spawning:
 [ -d "docs/plans/<slug>" ] || { echo "REFUSE: docs/plans/<slug>/ does not exist; mkdir -p it and re-run." >&2; exit 1; }
 ```
 
+**MySQL MCP spawn gate.** Also run, unconditionally (it is a silent
+no-op when the project configures no `mysql` MCP server):
+
+```bash
+bin/mysql-mcp-guard probe
+```
+
+REFUSE the /recon run — surfacing the CLI's stderr verbatim, which
+names the offending grants and the fix — when it exits nonzero:
+**exit 51** (`write_capable`: narrow the MySQL user to `SELECT`/`SHOW
+VIEW` first) or **exit 52** (`unverifiable`: a configured credential
+that could not be checked is not a pass, VISION §4.7).
+`SPLOCK_MYSQL_MCP_GUARD=warn|off` downgrades — the fix is the
+credential, not the knob. Same gate contract as `/qna`.
+
 ## What to do
 
 1. Parse `$ARGUMENTS` per `## Parse the operator's tail` above —
@@ -125,7 +140,10 @@ Bash dir-existence check before spawning:
      /plan` (or `## Recommendations for /implplan`) H2 section in its OWN
      artifact, which the planner now ingests (so a later `/plan <slug>
      --reopen` folds them in). The subagent is read-only (tools: Read, Grep,
-     Glob, WebFetch, WebSearch) — no Write access. **If `$wrapped_directive`
+     Glob, WebFetch, WebSearch, plus the `mysql` MCP server for read-only
+     live-schema interrogation in projects that configure one — used only
+     when the slug's evidence needs schema truth the tree cannot provide,
+     per `agents/recon.md` "MySQL MCP") — no Write access. **If `$wrapped_directive`
      is non-empty, include it verbatim in the spawn prompt** (alongside any
      other context), so the recon subagent sees the
      `<operator-directive>...</operator-directive>` block with the same
