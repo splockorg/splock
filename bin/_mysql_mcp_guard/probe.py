@@ -62,8 +62,10 @@ class Verdict:
     offending: list = field(default_factory=list)
 
 
-def load_mysql_server_block(project_root: Path) -> Optional[dict]:
-    """The `mysql` entry of `<project>/.mcp.json` `mcpServers`, or None."""
+def load_mysql_server_block(
+    project_root: Path, server: str = "mysql"
+) -> Optional[dict]:
+    """The named entry of `<project>/.mcp.json` `mcpServers`, or None."""
     mcp_path = project_root / ".mcp.json"
     if not mcp_path.is_file():
         return None
@@ -74,8 +76,26 @@ def load_mysql_server_block(project_root: Path) -> Optional[dict]:
         # unverifiable rather than silently inert.
         return {"__unparseable__": True}
     servers = config.get("mcpServers") or {}
-    block = servers.get("mysql")
+    block = servers.get(server)
     return block if isinstance(block, dict) else None
+
+
+def list_mysql_servers(project_root: Path) -> list:
+    """Every `mcpServers` name that begins with `mysql` — the guard's lane
+    set (naming contract per ADOPTION.md 'MySQL MCP for /qna and /recon')."""
+    mcp_path = project_root / ".mcp.json"
+    if not mcp_path.is_file():
+        return []
+    try:
+        config = json.loads(mcp_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    servers = config.get("mcpServers") or {}
+    return sorted(
+        name
+        for name, block in servers.items()
+        if name.startswith("mysql") and isinstance(block, dict)
+    )
 
 
 def _parse_dotenv(project_root: Path) -> dict:
@@ -166,9 +186,9 @@ def _cache_path(key: str) -> Path:
     return Path(tempfile.gettempdir()) / f"splock-mysql-mcp-guard-{key}.json"
 
 
-def _cache_key(server_block: dict, creds: dict) -> str:
+def _cache_key(server: str, server_block: dict, creds: dict) -> str:
     payload = json.dumps(
-        [server_block, creds["host"], creds["port"], creds["user"]],
+        [server, server_block, creds["host"], creds["port"], creds["user"]],
         sort_keys=True,
         default=str,
     )
@@ -196,11 +216,17 @@ def _cache_ok(key: str) -> None:
         pass
 
 
-def probe(project_root: Path, use_cache: bool = True) -> Verdict:
-    """Full probe pipeline. Never raises; every failure is a Verdict."""
-    server_block = load_mysql_server_block(project_root)
+def probe(
+    project_root: Path, server: str = "mysql", use_cache: bool = True
+) -> Verdict:
+    """Full probe pipeline for ONE named server. Never raises; every
+    failure is a Verdict. The per-call hook passes the server the tool
+    call actually targets, so each lane is graded on its own credential."""
+    server_block = load_mysql_server_block(project_root, server)
     if server_block is None:
-        return Verdict("inert", "no `mysql` MCP server configured — nothing to guard")
+        return Verdict(
+            "inert", f"no `{server}` MCP server configured — nothing to guard"
+        )
     if server_block.get("__unparseable__"):
         return Verdict("unverifiable", ".mcp.json exists but is not valid JSON")
 
@@ -208,11 +234,11 @@ def probe(project_root: Path, use_cache: bool = True) -> Verdict:
     if not creds["user"]:
         return Verdict(
             "unverifiable",
-            "could not resolve a MySQL user from the `mysql` server env / .env "
-            "(recognized names: MYSQL_USER, MYSQL_USERNAME, DB_USER)",
+            f"could not resolve a MySQL user from the `{server}` server env / "
+            ".env (recognized names: MYSQL_USER, MYSQL_USERNAME, DB_USER)",
         )
 
-    key = _cache_key(server_block, creds)
+    key = _cache_key(server, server_block, creds)
     if use_cache and _cached_ok(key):
         return Verdict("ok", "credential is read-only (cached verdict)")
 

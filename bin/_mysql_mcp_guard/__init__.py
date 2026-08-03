@@ -6,14 +6,16 @@ credential as the only load-bearing tier because the Bash hook spine never
 sees MCP calls. This package closes that gap with two deterministic layers
 (VISION §4.1: prose cannot enforce a boundary; §4.9: name the tiers):
 
-  1. **Statement filter** (`statement.py`) — a PreToolUse hook on
-     ``mcp__mysql__*`` denies write-shaped tool calls (non-read leading
+  1. **Statement filter** (`statement.py`) — a PreToolUse hook on every
+     MCP server whose name begins with ``mysql`` (matcher
+     ``mcp__mysql.*``) denies write-shaped tool calls (non-read leading
      verbs, INTO OUTFILE, write-lock clauses, write-shaped tool names)
      before they reach the server.
   2. **Credential probe** (`probe.py`) — ``SHOW GRANTS FOR CURRENT_USER()``
-     through the adopter's own `mysql` client; any privilege beyond the
-     read allowlist refuses the run until the MySQL user is narrowed
-     (VISION §4.7: fail closed, fail loudly).
+     through the adopter's own `mysql` client, against the SPECIFIC
+     server a call targets; any privilege beyond the read allowlist
+     refuses the run until the MySQL user is narrowed (VISION §4.7:
+     fail closed, fail loudly).
 
 The credential itself remains the hard floor — a hook only runs where hooks
 are installed. The probe exists to make a write-capable credential a loud

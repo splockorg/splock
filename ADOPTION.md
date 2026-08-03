@@ -136,13 +136,22 @@ MCP lane carries its own deterministic guard (VISION §4.1, §4.9):
   credentials, connection failure) refuses with **exit 52** — a gate
   that could not run is not a pass (VISION §4.7).
 - **Per-call hook** — `hooks/mysql-mcp-guard.sh` (PreToolUse, matcher
-  `mcp__mysql__.*`) fires on every mysql MCP call from any agent: it
-  denies write-shaped calls outright (non-read leading verbs,
-  `INTO OUTFILE`, write-lock clauses, write-shaped tool names — string
-  literals are stripped first, so `SELECT 'drop table'` passes) and
-  re-checks the credential probe (read-only verdicts cached 15
-  minutes; refusals re-probed immediately, so fixing the grant takes
-  effect at once).
+  `mcp__mysql.*`) fires on every call to **any MCP server whose name
+  begins with `mysql`**, from any agent: it denies write-shaped calls
+  outright (non-read leading verbs, `INTO OUTFILE`, write-lock
+  clauses, write-shaped tool names — string literals are stripped
+  first, so `SELECT 'drop table'` passes) and probes the credential of
+  the *specific server the call targets* (read-only verdicts cached 15
+  minutes per server; refusals re-probed immediately, so fixing a
+  grant takes effect at once).
+- **Naming contract for extra servers** — running several MySQL MCP
+  servers (staging/prod, multiple sites)? Prefix each name with
+  `mysql` (e.g. `mysql-shop-prod`) so it inherits the per-call guard.
+  A MySQL server named outside the prefix is credential-only — no
+  splock tier sees it. The subagent grant and the `/qna`+`/recon`
+  spawn gate bind only to the server named exactly `mysql`; sweep the
+  whole lane set with `bin/mysql-mcp-guard probe --all` (exit reflects
+  the worst verdict).
 - **Mode knob** — `SPLOCK_MYSQL_MCP_GUARD` = `halt` (default;
   refuse), `warn` (log to stderr, allow), `off` (skip). §4.12
   discipline: on by default; configuration turns it off. The fix for a

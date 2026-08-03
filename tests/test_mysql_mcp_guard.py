@@ -96,6 +96,23 @@ def test_tool_name_write_shape_denied_and_read_allowed() -> None:
     assert statement.check_tool_name("mcp__mysql__execute_sql") is None
 
 
+def test_tool_name_grading_on_suffixed_servers() -> None:
+    """Only the TOOL segment is graded — a server named `mysql-shop-prod`
+    must not trip on its own name, and its write tools must still trip."""
+    assert statement.check_tool_name("mcp__mysql-shop-prod__query") is None
+    assert statement.check_tool_name("mcp__mysql-shop-prod__insert_row") is not None
+
+
+def test_split_mcp_tool_name() -> None:
+    assert statement.split_mcp_tool_name("mcp__mysql__query") == ("mysql", "query")
+    assert statement.split_mcp_tool_name("mcp__mysql-shop-prod__query") == (
+        "mysql-shop-prod",
+        "query",
+    )
+    assert statement.split_mcp_tool_name("mcp__mysql") == ("mysql", "")
+    assert statement.split_mcp_tool_name("Bash") == ("", "Bash")
+
+
 def test_non_sql_parameters_are_not_graded() -> None:
     """A `table` param like "users" must not trip the leading-verb check."""
     assert (
@@ -300,6 +317,38 @@ def test_hook_denies_unverifiable_in_halt_mode(tmp_path) -> None:
     assert decision["permissionDecision"] == "deny"
 
 
+def test_hook_probes_the_server_the_call_targets(tmp_path) -> None:
+    """A call to `mysql-shop-prod` is graded on THAT server's credential —
+    a project whose only mysql server is the suffixed one must not slip
+    through an inert probe of the absent `mysql` entry."""
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"mysql-shop-prod": {"command": "x"}}}),
+        encoding="utf-8",
+    )
+    rc, out, _err = _fire_hook(
+        {
+            "tool_name": "mcp__mysql-shop-prod__query",
+            "tool_input": {"sql": "SELECT 1"},
+        },
+        extra_env={"CLAUDE_PROJECT_DIR": str(tmp_path)},
+    )
+    assert rc == 0
+    decision = json.loads(out)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"  # unverifiable, fail closed
+    assert "mysql-shop-prod" in decision["permissionDecisionReason"]
+
+
+def test_hooks_json_matcher_covers_mysql_prefixed_servers() -> None:
+    """The matcher must be the prefix form — the narrow `mcp__mysql__.*`
+    left every suffixed server (`mysql-<site>-prod`, …) unguarded."""
+    block = json.loads(
+        (REPO_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8")
+    )
+    matchers = [g.get("matcher", "") for g in block["hooks"]["PreToolUse"]]
+    assert "mcp__mysql.*" in matchers
+    assert "mcp__mysql__.*" not in matchers
+
+
 def test_hook_warn_mode_downgrades(tmp_path) -> None:
     _write_mcp_json(tmp_path, {"command": "some-mysql-mcp"})
     rc, out, err = _fire_hook(
@@ -372,6 +421,42 @@ def test_cli_probe_warn_mode_exits_zero(tmp_path) -> None:
     )
     assert proc.returncode == EXIT_OK
     assert "WARN" in proc.stderr
+
+
+def test_cli_probe_server_flag_targets_named_server(tmp_path) -> None:
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"mysql-shop-prod": {"command": "x"}}}),
+        encoding="utf-8",
+    )
+    # Default lane (`mysql`) is absent → inert.
+    proc = _run_cli(["probe", "--project-root", str(tmp_path)])
+    assert proc.returncode == EXIT_OK
+    # The suffixed server, probed by name → unverifiable.
+    proc = _run_cli(
+        ["probe", "--project-root", str(tmp_path), "--server", "mysql-shop-prod"]
+    )
+    assert proc.returncode == EXIT_UNVERIFIABLE
+
+
+def test_cli_probe_all_sweeps_and_reports_worst(tmp_path) -> None:
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "mysql": {"command": "x"},
+                    "mysql-shop-prod": {"command": "x"},
+                    "github": {"command": "x"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    proc = _run_cli(["probe", "--project-root", str(tmp_path), "--all"])
+    assert proc.returncode == EXIT_UNVERIFIABLE
+    # Both mysql lanes reported; the non-mysql server is not swept.
+    assert "[mysql]" in proc.stderr
+    assert "[mysql-shop-prod]" in proc.stderr
+    assert "github" not in proc.stderr + proc.stdout
 
 
 def test_cli_statement_write_exits_51() -> None:

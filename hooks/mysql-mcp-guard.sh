@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# hooks/mysql-mcp-guard.sh — PreToolUse hook on mcp__mysql__* tool calls.
+# hooks/mysql-mcp-guard.sh — PreToolUse hook on every MCP server whose
+# name begins with `mysql` (`mysql`, `mysql-<site>-prod`, … — the naming
+# contract per ADOPTION.md "MySQL MCP for /qna and /recon").
 #
-# Own hooks.json matcher ("mcp__mysql__.*") — NOT under
+# Own hooks.json matcher ("mcp__mysql.*") — NOT under
 # bin/security-dispatch.sh, whose matcher covers built-in tools only.
 # Dispatches to bin/_hooks/mysql_mcp_guard_hook.py:
 #
 #   Layer 1: statement filter — write-shaped tool name / SQL input → deny.
-#   Layer 2: credential probe — SHOW GRANTS beyond the read allowlist →
-#            deny; unverifiable → deny in halt mode (fail closed).
+#   Layer 2: credential probe of the SPECIFIC server the call targets —
+#            SHOW GRANTS beyond the read allowlist → deny; unverifiable
+#            → deny in halt mode (fail closed).
 #
 # Mode knob: SPLOCK_MYSQL_MCP_GUARD = halt (default) | warn | off.
 #

@@ -186,10 +186,25 @@ def _check_read_clauses(stmt: str) -> Optional[str]:
     return None
 
 
+def split_mcp_tool_name(tool_name: str) -> tuple:
+    """`mcp__<server>__<tool>` → (server, tool). A name with no tool segment
+    yields an empty tool; a name with no `mcp__` prefix yields ("", name)."""
+    if not tool_name.startswith("mcp__"):
+        return "", tool_name
+    rest = tool_name[len("mcp__"):]
+    server, sep, tool = rest.partition("__")
+    return (server, tool) if sep else (server, "")
+
+
 def check_tool_name(tool_name: str) -> Optional[str]:
-    """Return a refusal reason for a write-shaped MCP tool NAME, or None."""
-    suffix = tool_name.rpartition("mcp__mysql__")[2]
-    tokens = {t for t in re.split(r"[_\-]+", suffix.lower()) if t}
+    """Return a refusal reason for a write-shaped MCP tool NAME, or None.
+
+    Only the TOOL segment is graded — the server segment
+    (`mysql-shop-prod`, …) is routing, not intent.
+    """
+    server, tool = split_mcp_tool_name(tool_name)
+    target = tool or server
+    tokens = {t for t in re.split(r"[_\-]+", target.lower()) if t}
     hit = tokens & WRITE_SHAPED_TOOL_TOKENS
     if hit:
         return f"write-shaped mysql MCP tool name ({', '.join(sorted(hit))})"

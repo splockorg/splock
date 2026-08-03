@@ -77,13 +77,15 @@ through the MCP surface.
 
 1. **The DB credential is the hard floor** — a MySQL user granted
    `SELECT`/`SHOW VIEW` only (adopter-configured; see `ADOPTION.md`).
-2. **`hooks/mysql-mcp-guard.sh`** (PreToolUse, matcher `mcp__mysql__.*`)
+2. **`hooks/mysql-mcp-guard.sh`** (PreToolUse, matcher `mcp__mysql.*` —
+   every MCP server whose name begins with `mysql`)
    — unlike `safe-ddl`, which fires on Bash only, this hook sees every
    mysql MCP call. Layer 1 denies write-shaped calls (non-read leading
    verbs, `INTO OUTFILE`, write-lock clauses, write-shaped tool names);
-   layer 2 probes `SHOW GRANTS` through `bin/mysql-mcp-guard` and
-   denies while the credential holds anything beyond the read
-   allowlist — or cannot be verified (fail closed, VISION §4.7).
+   layer 2 probes `SHOW GRANTS` through `bin/mysql-mcp-guard` against
+   the specific server the call targets and denies while that
+   credential holds anything beyond the read allowlist — or cannot be
+   verified (fail closed, VISION §4.7).
    Mode knob `SPLOCK_MYSQL_MCP_GUARD` = `halt` (default) / `warn` /
    `off`.
 3. **This prose** — not a tier (VISION §4.1). It states the contract;

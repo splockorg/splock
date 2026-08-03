@@ -23,7 +23,7 @@
         ]
       },
       {
-        "matcher": "mcp__mysql__.*",
+        "matcher": "mcp__mysql.*",
         "hooks": [
           { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mysql-mcp-guard.sh" }
         ]

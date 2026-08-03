@@ -2,14 +2,19 @@
 
 Subcommands:
 
-  probe                 Verify the `mysql` MCP credential is read-only.
+  probe                 Verify a mysql MCP credential is read-only.
+                        Default server: `mysql` (the subagent lane);
+                        `--server <name>` probes another entry;
+                        `--all` sweeps every mysql-prefixed server and
+                        exits on the worst verdict.
                         Exit 0 inert/ok; 51 write-capable; 52 unverifiable.
                         `SPLOCK_MYSQL_MCP_GUARD=warn` downgrades 51/52 to a
                         stderr warning + exit 0; `off` skips entirely.
   statement --sql SQL   Grade one SQL string. Exit 0 clean / 51 write-shaped.
 
-The /qna slash layer runs `probe` as a spawn gate; the PreToolUse hook
-(`hooks/mysql-mcp-guard.sh`) applies both layers per MCP call.
+The /qna and /recon slash layers run `probe` as a spawn gate; the
+PreToolUse hook (`hooks/mysql-mcp-guard.sh`) applies both layers per MCP
+call, probing the specific server each call targets.
 """
 
 from __future__ import annotations
@@ -37,39 +42,64 @@ _FIX_HINT = (
 )
 
 
+def _verdict_exit(verdict, mode: str, server: str) -> int:
+    """Map one server's verdict to an exit code under the current mode."""
+    if verdict.status in ("inert", "ok"):
+        print(f"mysql-mcp-guard [{server}]: {verdict.status} — {verdict.detail}")
+        return EXIT_OK
+    if verdict.status == "write_capable":
+        if mode == "warn":
+            print(
+                f"mysql-mcp-guard [{server}]: WARN (downgraded) — {verdict.detail}",
+                file=sys.stderr,
+            )
+            return EXIT_OK
+        print(
+            f"mysql-mcp-guard [{server}]: REFUSE (exit {EXIT_WRITE_CAPABLE}) — "
+            f"{verdict.detail}\n{_FIX_HINT}",
+            file=sys.stderr,
+        )
+        return EXIT_WRITE_CAPABLE
+    # unverifiable
+    if mode == "warn":
+        print(
+            f"mysql-mcp-guard [{server}]: WARN (unverified) — {verdict.detail}",
+            file=sys.stderr,
+        )
+        return EXIT_OK
+    print(
+        f"mysql-mcp-guard [{server}]: REFUSE (exit {EXIT_UNVERIFIABLE}) — "
+        f"{verdict.detail}\n"
+        "A gate that could not run is not a pass (VISION §4.7). "
+        "Verify the credential manually, then either make the probe runnable "
+        "(mysql client on PATH + resolvable creds) or set "
+        "SPLOCK_MYSQL_MCP_GUARD=warn to accept unverified.",
+        file=sys.stderr,
+    )
+    return EXIT_UNVERIFIABLE
+
+
 def _run_probe(args: argparse.Namespace) -> int:
     mode = probe_mod.resolve_mode()
     if mode == "off":
         print("mysql-mcp-guard: mode=off — probe skipped")
         return EXIT_OK
     root = Path(args.project_root).resolve() if args.project_root else project_root()
-    verdict = probe_mod.probe(root, use_cache=not args.no_cache)
-    if verdict.status in ("inert", "ok"):
-        print(f"mysql-mcp-guard: {verdict.status} — {verdict.detail}")
-        return EXIT_OK
-    if verdict.status == "write_capable":
-        message = (
-            f"mysql-mcp-guard: REFUSE (exit {EXIT_WRITE_CAPABLE}) — "
-            f"{verdict.detail}\n{_FIX_HINT}"
-        )
-        if mode == "warn":
-            print(f"mysql-mcp-guard: WARN (downgraded) — {verdict.detail}", file=sys.stderr)
+    if args.all:
+        servers = probe_mod.list_mysql_servers(root)
+        if not servers:
+            print("mysql-mcp-guard: inert — no mysql-prefixed MCP servers configured")
             return EXIT_OK
-        print(message, file=sys.stderr)
-        return EXIT_WRITE_CAPABLE
-    # unverifiable
-    message = (
-        f"mysql-mcp-guard: REFUSE (exit {EXIT_UNVERIFIABLE}) — {verdict.detail}\n"
-        "A gate that could not run is not a pass (VISION §4.7). "
-        "Verify the credential manually, then either make the probe runnable "
-        "(mysql client on PATH + resolvable creds) or set "
-        "SPLOCK_MYSQL_MCP_GUARD=warn to accept unverified."
-    )
-    if mode == "warn":
-        print(f"mysql-mcp-guard: WARN (unverified) — {verdict.detail}", file=sys.stderr)
-        return EXIT_OK
-    print(message, file=sys.stderr)
-    return EXIT_UNVERIFIABLE
+    else:
+        servers = [args.server]
+    # Worst-of across servers: write_capable outranks unverifiable outranks ok.
+    worst = EXIT_OK
+    for server in servers:
+        verdict = probe_mod.probe(root, server=server, use_cache=not args.no_cache)
+        rc = _verdict_exit(verdict, mode, server)
+        if rc == EXIT_WRITE_CAPABLE or (rc == EXIT_UNVERIFIABLE and worst == EXIT_OK):
+            worst = rc
+    return worst
 
 
 def _run_statement(args: argparse.Namespace) -> int:
@@ -88,10 +118,20 @@ def main(argv: list = None) -> int:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_probe = sub.add_parser("probe", help="verify the mysql MCP credential is read-only")
+    p_probe = sub.add_parser("probe", help="verify a mysql MCP credential is read-only")
     p_probe.add_argument("--project-root", help="override adopter project root")
     p_probe.add_argument(
         "--no-cache", action="store_true", help="skip the 15-minute ok-verdict cache"
+    )
+    p_probe.add_argument(
+        "--server",
+        default="mysql",
+        help="which mcpServers entry to probe (default: mysql — the subagent lane)",
+    )
+    p_probe.add_argument(
+        "--all",
+        action="store_true",
+        help="probe every mysql-prefixed server; exit reflects the worst verdict",
     )
     p_probe.set_defaults(func=_run_probe)
 

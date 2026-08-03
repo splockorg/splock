@@ -1,8 +1,12 @@
 """Python entry point for the mysql-mcp-guard PreToolUse hook.
 
-Fires on tool names matching ``mcp__mysql__.*`` (own hooks.json matcher —
-NOT under bin/security-dispatch.sh, whose matcher covers built-in tools
-only). Two layers, first-deny-wins:
+Fires on tool names matching ``mcp__mysql.*`` — every MCP server whose
+NAME begins with ``mysql`` (`mysql`, `mysql-shop-prod`, …), per the
+naming contract in ADOPTION.md. Own hooks.json matcher — NOT under
+bin/security-dispatch.sh, whose matcher covers built-in tools only. The
+credential probe targets the SPECIFIC server the call addresses, parsed
+from the tool name, so each lane is graded on its own credential. Two
+layers, first-deny-wins:
 
   1. Statement filter — write-shaped tool name or SQL input → deny.
   2. Credential probe — SHOW GRANTS beyond the read allowlist → deny;
@@ -91,8 +95,10 @@ def main() -> int:
             _hook_log("blocked", f"tool={tool_name} {reason}")
             return 0
 
-    # Layer 2 — credential probe (ok-verdicts cached 15 min).
-    verdict = probe_mod.probe(project_root())
+    # Layer 2 — credential probe of the server this call addresses
+    # (ok-verdicts cached 15 min, keyed per server).
+    server, _tool = statement.split_mcp_tool_name(tool_name)
+    verdict = probe_mod.probe(project_root(), server=server or "mysql")
     if verdict.status in ("inert", "ok"):
         _hook_log("ok", f"tool={tool_name} probe={verdict.status}")
         return 0
