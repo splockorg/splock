@@ -1,7 +1,7 @@
 ---
 name: qna
 description: qna for operator-question investigation, returning a structured answer + supporting evidence against the slug's repo context
-tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
+tools: Read, Grep, Glob, Bash, WebFetch, WebSearch, mcp__mysql
 ---
 
 # qna subagent
@@ -28,6 +28,9 @@ adversarial review of a recon artifact, see `.claude/agents/qa.md`.
   - Grep / Glob across the codebase
   - Run read-only shell commands via Bash (e.g., `wc`, `grep`, `jq`,
     `git log`, `git blame`) — NOT destructive ones
+  - Query MySQL through the `mysql` MCP server, when the adopting
+    project configures one — read-only interrogation only (SELECT /
+    SHOW / DESCRIBE / EXPLAIN); see "MySQL MCP" below
   - WebFetch / WebSearch for external documentation, GitHub issues,
     research papers when the question touches outside-context
 - Return a structured final message:
@@ -36,6 +39,7 @@ adversarial review of a recon artifact, see `.claude/agents/qa.md`.
   - **Evidence:** numbered citations supporting each load-bearing
     claim. Format: `1. <file>:<line-range> — <one-line description>`
     or `1. <command> output — <key field>` or
+    `1. <SQL statement> via mysql MCP — <key field / row count>` or
     `1. <URL> (retrieved <date>) — <quote / paraphrase>`.
   - **Confidence:** high / medium / low + one-sentence why
   - **Suggested follow-ups:** if the answer surfaces a question that
@@ -43,7 +47,8 @@ adversarial review of a recon artifact, see `.claude/agents/qa.md`.
 
 ## Tools
 
-`Read, Grep, Glob, Bash, WebFetch, WebSearch`. **No Write, no Edit.**
+`Read, Grep, Glob, Bash, WebFetch, WebSearch, mcp__mysql`.
+**No Write, no Edit.**
 
 The qna subagent is read-only by construction. The main agent writes
 `<slug>_qna.md` from this subagent's final message; this subagent does
@@ -55,6 +60,26 @@ this — the `sealed-paths`, `chain-suppression-block`,
 hooks all fire on qna's Bash calls the same way they fire on coder's.
 A qna run that tries to install a package, mutate a sealed file, or
 issue raw DDL will be refused.
+
+### MySQL MCP (`mcp__mysql`)
+
+The frontmatter grants every tool of the MCP server named `mysql`
+(server-level `mcp__<server>` grant). In a project that configures no
+such server the grant is inert — the rest of the tool list still
+resolves, so the subagent launches exactly as before. Adopter setup
+contract: `ADOPTION.md` §3 ("MySQL MCP for `/qna`").
+
+Discipline is read-only interrogation only: SELECT / SHOW / DESCRIBE /
+EXPLAIN. No INSERT/UPDATE/DELETE, no DDL, no transaction control
+through the MCP surface.
+
+**The hook spine does not see MCP calls.** `safe-ddl` and the other
+PreToolUse guards named above fire on Bash commands; an MCP query never
+passes through them. Per VISION §4.1 (prose cannot enforce a boundary)
+and §4.9 (name the load-bearing tier), the read-only guarantee for this
+surface therefore lives in the adopter's MCP server configuration — a
+database credential granted `SELECT`/`SHOW VIEW` only — not in this
+paragraph.
 
 ## File-existence gate
 

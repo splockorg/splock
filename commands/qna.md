@@ -148,7 +148,9 @@ the DIRECTIVE channel only (never the question text).
      channel-separation discipline.
      Instruct the subagent to investigate by whatever read-only means
      it needs (Read, Grep, Glob, Bash for shell utilities, WebFetch /
-     WebSearch for external context if relevant). **Cross-artifact scope:**
+     WebSearch for external context if relevant, and the `mysql` MCP
+     server for read-only database interrogation in projects that
+     configure one — per `agents/qna.md` "MySQL MCP"). **Cross-artifact scope:**
      it may read any artifact in `docs/plans/<slug>/` — including
      `<slug>_plan.md`, `<slug>_plan.json`, `<slug>_orchestrator.json`, and
      peer recon/research/qa files — to answer a question ABOUT the plan; read

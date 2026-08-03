@@ -84,6 +84,41 @@ not put them in `.splock.toml`. There is intentionally no `.env.example`
 shipped — the complete environment-variable interface is documented in
 Section 4 below, which is the authoritative reference.
 
+### MySQL MCP for `/qna`
+
+The `qna` subagent's tool surface includes `mcp__mysql` — a
+server-level grant of every tool from an MCP server named `mysql`. To
+activate it, configure such a server in the adopting project's
+`.mcp.json`. Any MySQL MCP server implementation works; the only
+contract is the server *name*:
+
+```json
+{
+  "mcpServers": {
+    "mysql": {
+      "command": "<your mysql MCP server launcher>",
+      "env": { "MYSQL_HOST": "...", "MYSQL_USER": "...", "MYSQL_PASS": "..." }
+    }
+  }
+}
+```
+
+Two hard requirements:
+
+- **Use a read-only credential.** MCP tool calls do not pass through
+  the Bash hook spine — `safe-ddl` and friends never see them — so the
+  read-only guarantee must live in the database grant itself (VISION
+  §4.9: the load-bearing tier is named, and here it is the credential).
+  Give the MCP server a MySQL user with `SELECT` / `SHOW VIEW` only.
+- **Secrets follow the same rule as the intent backend:** credentials
+  go in the MCP server's env / a local `.env`, never in `.splock.toml`,
+  never committed.
+
+Projects that configure no `mysql` server need to do nothing: the grant
+is inert and `/qna` runs exactly as before (§4.12 zero-config
+discipline — the capability is on by default, absent without config,
+and there is nothing to disable).
+
 ---
 
 ## 4. Environment-variable interface (complete `SPLOCK_*` reference)

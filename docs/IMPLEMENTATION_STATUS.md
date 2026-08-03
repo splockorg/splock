@@ -24,6 +24,7 @@ Section references (`§n`) point at `VISION.md`.
 | Schema-or-refuse — 15 JSON Schemas, draft 2020-12 enforced (§8) | `schemas/`; `tests/acceptance/test_acceptance_H_all_schemas_draft_2020_12.py`, `test_acceptance_J_schemas_consumers_match.py` |
 | Lifecycle surface — 11 slash commands, 9 subagents + roster (§5) | `commands/`, `agents/`; `tests/acceptance/test_acceptance_J_roster_schema_subagent_enum_identity.py`, `test_acceptance_I_recon_not_a_slash_command.py`, `tests/test_agent_twins_match_the_engine.py` |
 | One vocabulary — qa / qna / eli5 disjoint (§5) | `bin/eli5`, `bin/_eli5/`, `commands/eli5.md`, `agents/eli5.md`; `tests/test_eli5/` |
+| qna database interrogation — server-level `mcp__mysql` grant; inert without adopter MCP config (§4.12); read-only tier = the DB credential, since hooks do not see MCP calls (§4.1, §4.9) | `agents/qna.md` frontmatter + "MySQL MCP" section; `ADOPTION.md` §3 "MySQL MCP for `/qna`" |
 | fleet — per-slug state, generated hub zones, 11 subcommands (§10) | `bin/fleet`, `bin/_fleet/`; `tests/test_fleet_engine.py`, `test_fleet_close_and_zones.py` |
 | Contention designed out — per-slug writes joined at render (§4.6) | `bin/_fleet/`; `tests/test_fleet_concurrency.py` |
 | fleet C&C — `spawn` / `board` / `resume` on subscription CLI transport (§10) | `bin/_fleet/spawn.py`, `spawn_runner.py`, `board.py`; `tests/test_fleet_cnc.py` |
