@@ -73,13 +73,25 @@ Discipline is read-only interrogation only: SELECT / SHOW / DESCRIBE /
 EXPLAIN. No INSERT/UPDATE/DELETE, no DDL, no transaction control
 through the MCP surface.
 
-**The hook spine does not see MCP calls.** `safe-ddl` and the other
-PreToolUse guards named above fire on Bash commands; an MCP query never
-passes through them. Per VISION §4.1 (prose cannot enforce a boundary)
-and §4.9 (name the load-bearing tier), the read-only guarantee for this
-surface therefore lives in the adopter's MCP server configuration — a
-database credential granted `SELECT`/`SHOW VIEW` only — not in this
-paragraph.
+**Enforcement tiers (per VISION §4.9, named in order):**
+
+1. **The DB credential is the hard floor** — a MySQL user granted
+   `SELECT`/`SHOW VIEW` only (adopter-configured; see `ADOPTION.md`).
+2. **`hooks/mysql-mcp-guard.sh`** (PreToolUse, matcher `mcp__mysql__.*`)
+   — unlike `safe-ddl`, which fires on Bash only, this hook sees every
+   mysql MCP call. Layer 1 denies write-shaped calls (non-read leading
+   verbs, `INTO OUTFILE`, write-lock clauses, write-shaped tool names);
+   layer 2 probes `SHOW GRANTS` through `bin/mysql-mcp-guard` and
+   denies while the credential holds anything beyond the read
+   allowlist — or cannot be verified (fail closed, VISION §4.7).
+   Mode knob `SPLOCK_MYSQL_MCP_GUARD` = `halt` (default) / `warn` /
+   `off`.
+3. **This prose** — not a tier (VISION §4.1). It states the contract;
+   it does not enforce it.
+
+The `/qna` slash layer additionally runs `bin/mysql-mcp-guard probe` as
+a spawn gate, so a write-capable credential refuses the run up front
+(exit 51) instead of mid-investigation.
 
 ## File-existence gate
 

@@ -105,14 +105,53 @@ contract is the server *name*:
 
 Two hard requirements:
 
-- **Use a read-only credential.** MCP tool calls do not pass through
-  the Bash hook spine — `safe-ddl` and friends never see them — so the
-  read-only guarantee must live in the database grant itself (VISION
-  §4.9: the load-bearing tier is named, and here it is the credential).
-  Give the MCP server a MySQL user with `SELECT` / `SHOW VIEW` only.
+- **Use a read-only credential.** Give the MCP server a MySQL user with
+  `SELECT` / `SHOW VIEW` only:
+
+  ```sql
+  CREATE USER 'splock_ro'@'%' IDENTIFIED BY '...';
+  GRANT SELECT, SHOW VIEW ON your_db.* TO 'splock_ro'@'%';
+  ```
+
+  This is **enforced, not requested** — the `mysql-mcp-guard` (below)
+  refuses to run while the credential can write.
 - **Secrets follow the same rule as the intent backend:** credentials
   go in the MCP server's env / a local `.env`, never in `.splock.toml`,
   never committed.
+
+#### The mysql-mcp-guard
+
+Bash-tier hooks (`safe-ddl` and friends) never see MCP calls, so the
+MCP lane carries its own deterministic guard (VISION §4.1, §4.9):
+
+- **Spawn gate** — `/qna` runs `bin/mysql-mcp-guard probe` before
+  spawning the subagent. The probe runs `SHOW GRANTS FOR
+  CURRENT_USER()` through your own `mysql`/`mariadb` client and grades
+  the result against a closed read allowlist (`USAGE`, `SELECT`,
+  `SHOW VIEW`, `SHOW DATABASES`, `PROCESS`). A write-capable credential
+  refuses with **exit 51**, naming the offending grants and the fix. A
+  configured-but-unverifiable setup (no client binary, unresolvable
+  credentials, connection failure) refuses with **exit 52** — a gate
+  that could not run is not a pass (VISION §4.7).
+- **Per-call hook** — `hooks/mysql-mcp-guard.sh` (PreToolUse, matcher
+  `mcp__mysql__.*`) fires on every mysql MCP call from any agent: it
+  denies write-shaped calls outright (non-read leading verbs,
+  `INTO OUTFILE`, write-lock clauses, write-shaped tool names — string
+  literals are stripped first, so `SELECT 'drop table'` passes) and
+  re-checks the credential probe (read-only verdicts cached 15
+  minutes; refusals re-probed immediately, so fixing the grant takes
+  effect at once).
+- **Mode knob** — `SPLOCK_MYSQL_MCP_GUARD` = `halt` (default;
+  refuse), `warn` (log to stderr, allow), `off` (skip). §4.12
+  discipline: on by default; configuration turns it off. The fix for a
+  refusal is the credential, not the knob.
+
+Credential resolution for the probe: the `mysql` server's `env` block
+(with `${VAR}` expansion) over the project `.env` over process env;
+recognized names `MYSQL_HOST/PORT/USER/PASSWORD` (plus common aliases
+`MYSQL_USERNAME`, `MYSQL_PASS`, `DB_USER`, `DB_PASSWORD`, …). The
+password travels via `MYSQL_PWD` in the probe's environment, never on
+its argv.
 
 Projects that configure no `mysql` server need to do nothing: the grant
 is inert and `/qna` runs exactly as before (§4.12 zero-config
@@ -139,6 +178,7 @@ provides.
 | `SPLOCK_INTENT_AREA` | Pre-set the intent "area" string, taking precedence over the `--area` CLI flag. | unset | free string |
 | `SPLOCK_INTENT_SUMMARY` | Pre-set the intent summary string, taking precedence over the `--summary` CLI flag. | unset | free string |
 | `SPLOCK_SEALED_PATHS_FILE` | Override the path to the sealed-paths inventory file. | unset → `hooks/sealed_paths.txt` | a file path |
+| `SPLOCK_MYSQL_MCP_GUARD` | Read-only gate on the `mysql` MCP surface (§3 "MySQL MCP for `/qna`"): statement filter + `SHOW GRANTS` credential probe. | `halt` | `halt`, `warn`, `off` |
 
 ### 4.2 Chain-context variables (set by the driver — you normally do not set these)
 

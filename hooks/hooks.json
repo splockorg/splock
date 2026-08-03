@@ -21,6 +21,12 @@
         "hooks": [
           { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/chain-sealed-state-delete-block.sh" }
         ]
+      },
+      {
+        "matcher": "mcp__mysql__.*",
+        "hooks": [
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mysql-mcp-guard.sh" }
+        ]
       }
     ],
     "PostToolUse": [

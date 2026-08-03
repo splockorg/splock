@@ -109,6 +109,28 @@ the DIRECTIVE channel only (never the question text).
 [ -d "docs/plans/<slug>" ] || { echo "REFUSE: docs/plans/<slug>/ does not exist." >&2; exit 1; }
 ```
 
+**MySQL MCP spawn gate.** Also run, unconditionally (it is a silent
+no-op when the project configures no `mysql` MCP server):
+
+```bash
+bin/mysql-mcp-guard probe
+```
+
+REFUSE the /qna run — surfacing the CLI's stderr verbatim, which names
+the offending grants and the fix — when it exits nonzero:
+
+- **exit 51** (`write_capable`): the `mysql` MCP credential holds
+  privileges beyond the read allowlist. The operator must narrow the
+  MySQL user to `SELECT`/`SHOW VIEW` before /qna runs.
+- **exit 52** (`unverifiable`): a `mysql` server is configured but the
+  credential could not be verified. A gate that could not run is not a
+  pass (VISION §4.7).
+
+`SPLOCK_MYSQL_MCP_GUARD=warn` downgrades both to a warning (the
+per-call hook `hooks/mysql-mcp-guard.sh` downgrades in lockstep);
+`off` disables the guard. Do not suggest either as the first remedy —
+the fix is the credential, not the gate.
+
 ## What to do
 
 1. Parse `$ARGUMENTS`: split on the first whitespace to extract the

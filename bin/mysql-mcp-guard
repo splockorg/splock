@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# bin/mysql-mcp-guard — read-only gate for the `mysql` MCP surface.
+#
+# POSIX shell wrapper that activates the project venv and dispatches to
+# `python -m bin._mysql_mcp_guard.cli`. Two subcommands:
+#
+#   probe                (spawn-gate; verifies the mysql MCP credential is
+#                         read-only via SHOW GRANTS)
+#   statement --sql SQL  (grade one SQL string as read / write-shaped)
+#
+# Exit codes: 0 ok-or-inert / 1 usage / 51 write-capable / 52 unverifiable.
+# Mode knob: SPLOCK_MYSQL_MCP_GUARD = halt (default) | warn | off.
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Preserve the invoking directory for bin/_env_paths.project_root():
+# the cd below moves to the plugin/checkout root, which in installed-
+# plugin mode is NOT the adopter repo the CLI must operate on.
+export SPLOCK_CALLER_PWD="${SPLOCK_CALLER_PWD:-$PWD}"
+cd "$REPO_ROOT"
+
+VENV_PATH="${SPLOCK_VENV:-.venv}"
+if [ -f "$VENV_PATH/bin/activate" ] && [ -z "${VIRTUAL_ENV:-}" ]; then
+    # shellcheck disable=SC1091
+    source "$VENV_PATH/bin/activate"
+fi
+
+exec "$(command -v python || command -v python3)" -m bin._mysql_mcp_guard.cli "$@"
