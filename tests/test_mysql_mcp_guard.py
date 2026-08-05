@@ -467,3 +467,319 @@ def test_cli_statement_write_exits_51() -> None:
 def test_cli_statement_read_exits_zero() -> None:
     proc = _run_cli(["statement", "--sql", "SELECT 1"])
     assert proc.returncode == EXIT_OK
+
+
+# --------------------------------------------------------------------------- #
+# Late-bound credentials — the Secrets-Manager / Vault / `op run` shape        #
+#                                                                             #
+# The failing case this section was written for: five read-only MySQL MCP     #
+# lanes whose launcher fetches `mcp_ro` from AWS Secrets Manager at spawn and #
+# exports MYSQL_USER/MYSQL_PASS into the server process. The `.mcp.json`      #
+# blocks carry NO `env` key at all, so every lane graded `unverifiable` and   #
+# the PreToolUse hook denied every call on a credential that was in fact      #
+# SELECT-only. Aliasing more env names cannot fix it — the names are not on   #
+# disk under any spelling. The lane declares its resolver instead.            #
+# --------------------------------------------------------------------------- #
+
+_LAUNCHER = r"""#!/usr/bin/env bash
+# Stand-in for a Secrets-Manager launcher: nothing is on disk before it runs.
+set -euo pipefail
+if [ -f "$(dirname "$0")/broken" ]; then
+  echo "secret store unreachable" >&2
+  exit 1
+fi
+if [ "${1:-}" = "--print-credentials" ]; then
+  printf 'MYSQL_HOST=db.internal\nMYSQL_PORT=3306\n'
+  printf 'MYSQL_USER=mcp_ro\nMYSQL_PASSWORD=s3cret\n'
+  exit 0
+fi
+exec fake-mysql-mcp-server
+"""
+
+_RO_GRANTS = "GRANT USAGE ON *.* TO `mcp_ro`@`%`\nGRANT SELECT, SHOW VIEW ON `pp`.* TO `mcp_ro`@`%`\n"  # noqa: E501
+
+
+def _write_launcher(root: Path) -> Path:
+    path = root / "mysql_mcp.sh"
+    path.write_text(_LAUNCHER, encoding="utf-8")
+    os.chmod(path, 0o755)
+    return path
+
+
+def _late_bound_block(launcher: Path, declare: bool = True) -> dict:
+    block = {"command": "bash", "args": [str(launcher), "pp"]}
+    if declare:
+        block["env"] = {
+            probe_mod.CREDENTIAL_COMMAND_KEY: f"bash {launcher} --print-credentials"
+        }
+    return block
+
+
+def _fake_client(monkeypatch, grants: str, path: str = "/usr/bin/mysql") -> dict:
+    """Fake the `mysql` client seam ONLY — the credential command must still
+    run for real, or the test would not exercise late binding at all."""
+    real_run = subprocess.run
+    captured: dict = {}
+
+    monkeypatch.setattr(
+        probe_mod.shutil,
+        "which",
+        lambda name: path if name in ("mysql", "mariadb") else None,
+    )
+
+    def dispatch(argv, **kwargs):
+        if argv and str(argv[0]) == path:
+            captured["argv"] = list(argv)
+            captured["env"] = kwargs.get("env", {})
+
+            class _P:
+                returncode = 0
+                stdout = grants
+                stderr = ""
+
+            return _P()
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(probe_mod.subprocess, "run", dispatch)
+    return captured
+
+
+def test_late_bound_block_is_diagnosed_as_late_bound(tmp_path: Path) -> None:
+    """A block with no `env` must not be told to check its alias spelling."""
+    _write_mcp_json(tmp_path, {"command": "bash", "args": ["launch.sh", "pp"]})
+    verdict = probe_mod.probe(tmp_path, use_cache=False)
+    assert verdict.status == "unverifiable"
+    assert verdict.reason == probe_mod.REASON_LATE_BOUND
+    assert probe_mod.CREDENTIAL_COMMAND_KEY in verdict.detail
+    assert "no alias will help" in verdict.detail
+
+
+def test_credential_command_verifies_a_late_bound_lane(tmp_path, monkeypatch) -> None:
+    launcher = _write_launcher(tmp_path)
+    _write_mcp_json(tmp_path, _late_bound_block(launcher))
+    captured = _fake_client(monkeypatch, _RO_GRANTS)
+
+    verdict = probe_mod.probe(tmp_path, use_cache=False)
+
+    assert verdict.status == "ok"
+    assert "mcp_ro@db.internal" in verdict.detail
+    assert probe_mod.SOURCE_RESOLVER in verdict.detail
+    # The resolved password still travels via MYSQL_PWD, never on argv.
+    assert captured["env"].get("MYSQL_PWD") == "s3cret"
+    assert not any("s3cret" in str(a) for a in captured["argv"])
+    assert "--user=mcp_ro" in captured["argv"]
+
+
+def test_credential_command_does_not_excuse_a_write_capable_grant(
+    tmp_path, monkeypatch
+) -> None:
+    """The fix makes correct setups verifiable — it is not a way through."""
+    launcher = _write_launcher(tmp_path)
+    _write_mcp_json(tmp_path, _late_bound_block(launcher))
+    _fake_client(monkeypatch, "GRANT SELECT, INSERT ON `pp`.* TO `mcp_ro`@`%`\n")
+
+    verdict = probe_mod.probe(tmp_path, use_cache=False)
+
+    assert verdict.status == "write_capable"
+    assert "INSERT" in verdict.offending
+
+
+def test_failed_resolver_is_unverifiable_and_no_cached_ok_rescues_it(
+    tmp_path, monkeypatch
+) -> None:
+    """A resolver that stops working must re-refuse immediately: resolution
+    runs before the cache is consulted, so an earlier pass cannot stand in
+    for a credential nobody can read any more."""
+    launcher = _write_launcher(tmp_path)
+    _write_mcp_json(tmp_path, _late_bound_block(launcher))
+    _fake_client(monkeypatch, _RO_GRANTS)
+
+    assert probe_mod.probe(tmp_path, use_cache=True).status == "ok"  # caches ok
+    (tmp_path / "broken").write_text("", encoding="utf-8")  # secret store down
+
+    verdict = probe_mod.probe(tmp_path, use_cache=True)
+    assert verdict.status == "unverifiable"
+    assert verdict.reason == probe_mod.REASON_RESOLVER_FAILED
+    assert "secret store unreachable" in verdict.detail
+
+
+def test_cache_key_covers_the_declared_resolver() -> None:
+    """Repointing a lane at another resolver must not hit the old verdict."""
+    creds = {"host": "h", "port": "3306", "user": "mcp_ro"}
+    block = {"command": "bash"}
+    assert probe_mod._cache_key("mysql", block, creds, "resolve-pp") != (
+        probe_mod._cache_key("mysql", block, creds, "resolve-prod")
+    )
+
+
+def test_resolver_declaration_is_per_lane_not_project_wide(tmp_path: Path) -> None:
+    """A .env-level declaration would grade every lane with one lane's
+    credential — refuse, and say where the declaration belongs."""
+    (tmp_path / ".env").write_text(
+        f"{probe_mod.CREDENTIAL_COMMAND_KEY}=echo MYSQL_USER=mcp_ro\n",
+        encoding="utf-8",
+    )
+    _write_mcp_json(tmp_path, {"command": "bash", "args": ["launch.sh"]})
+
+    verdict = probe_mod.probe(tmp_path, use_cache=False)
+
+    assert verdict.status == "unverifiable"
+    assert "server's own `env` block" in verdict.detail
+
+
+def test_resolver_that_prints_no_user_is_unverifiable(tmp_path, monkeypatch) -> None:
+    _write_mcp_json(
+        tmp_path,
+        {
+            "command": "x",
+            "env": {probe_mod.CREDENTIAL_COMMAND_KEY: "echo MYSQL_HOST=db.internal"},
+        },
+    )
+    _fake_client(monkeypatch, _RO_GRANTS)
+    verdict = probe_mod.probe(tmp_path, use_cache=False)
+    assert verdict.status == "unverifiable"
+    assert verdict.reason == probe_mod.REASON_RESOLVER_FAILED
+
+
+def test_missing_client_binary_has_its_own_reason_and_remedy(
+    tmp_path, monkeypatch
+) -> None:
+    """Same shape as late binding — a correct setup that cannot be verified —
+    but a different remedy, so it must not share the message."""
+    _write_mcp_json(tmp_path, {"command": "x", "env": {"MYSQL_USER": "ro"}})
+    monkeypatch.setattr(probe_mod.shutil, "which", lambda _name: None)
+    verdict = probe_mod.probe(tmp_path, use_cache=False)
+    assert verdict.reason == probe_mod.REASON_NO_CLIENT
+    assert "install a client" in verdict.detail
+
+
+def test_ambient_credential_is_not_attributable_to_the_lane(
+    tmp_path, monkeypatch
+) -> None:
+    """The quiet half of late binding: a user the server block never named
+    is graded anyway, and the pass reads as if it were about this lane."""
+    monkeypatch.setenv("MYSQL_USER", "whoever")
+    monkeypatch.setenv("MYSQL_HOST", "127.0.0.1")
+    _write_mcp_json(tmp_path, {"command": "bash", "args": ["launch.sh"]})
+    _fake_client(monkeypatch, "GRANT SELECT ON `pp`.* TO `whoever`@`%`\n")
+
+    verdict = probe_mod.probe(tmp_path, use_cache=False)
+
+    assert verdict.status == "unverifiable"
+    assert verdict.reason == probe_mod.REASON_UNATTRIBUTED
+    # Both remedies named — the block may well be inheriting it legitimately.
+    assert "MYSQL_USER" in verdict.detail
+    assert probe_mod.CREDENTIAL_COMMAND_KEY in verdict.detail
+
+
+def test_dotenv_credential_is_not_attributable_either(tmp_path, monkeypatch) -> None:
+    """Field shape: several `mysql*` lanes, no `env` on any of them, one bare
+    credential in `.env` — every lane graded that one user, on one host, and
+    reported read-only. `.env` is no more attributable than the shell is."""
+    (tmp_path / ".env").write_text(
+        "MYSQL_USER=app_rw\nMYSQL_HOST=app-db\n", encoding="utf-8"
+    )
+    _write_mcp_json(tmp_path, {"command": "bash", "args": ["launch.sh", "prod"]})
+    _fake_client(monkeypatch, "GRANT SELECT ON `pp`.* TO `app_rw`@`%`\n")
+
+    verdict = probe_mod.probe(tmp_path, use_cache=False)
+
+    assert verdict.status == "unverifiable"
+    assert verdict.reason == probe_mod.REASON_UNATTRIBUTED
+    assert "app_rw@app-db" in verdict.detail
+
+
+def test_server_block_declaring_its_user_is_attributed(tmp_path, monkeypatch) -> None:
+    """The documented shape stays green — and `${VAR}` indirection through
+    `.env` is still a declaration, because the block is what names it."""
+    (tmp_path / ".env").write_text("DB_RO_USER=ro\n", encoding="utf-8")
+    _write_mcp_json(
+        tmp_path,
+        {"command": "x", "env": {"MYSQL_USER": "${DB_RO_USER}", "MYSQL_HOST": "h"}},
+    )
+    _fake_client(monkeypatch, "GRANT SELECT ON `pp`.* TO `ro`@`%`\n")
+
+    verdict = probe_mod.probe(tmp_path, use_cache=False)
+
+    assert verdict.status == "ok"
+    assert "ro@h" in verdict.detail
+
+
+# --- end to end: real launcher, real credential command, fake mysql client -- #
+
+
+def _fake_mysql_on_path(root: Path, grants: str) -> Path:
+    bindir = root / "fakebin"
+    bindir.mkdir(exist_ok=True)
+    client = bindir / "mysql"
+    client.write_text(
+        "#!/usr/bin/env bash\ncat <<'EOF'\n" + grants + "EOF\n", encoding="utf-8"
+    )
+    os.chmod(client, 0o755)
+    return bindir
+
+
+def test_hook_denies_the_late_bound_lane_without_a_declaration(tmp_path) -> None:
+    """The regression, stated as the hook sees it: correct read-only setup,
+    every MCP call denied, because the credential is unreadable from here."""
+    launcher = _write_launcher(tmp_path)
+    _write_mcp_json(tmp_path, _late_bound_block(launcher, declare=False))
+    bindir = _fake_mysql_on_path(tmp_path, _RO_GRANTS)
+
+    rc, out, _err = _fire_hook(
+        {"tool_name": "mcp__mysql__query", "tool_input": {"sql": "SELECT 1"}},
+        extra_env={
+            "CLAUDE_PROJECT_DIR": str(tmp_path),
+            "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
+        },
+    )
+    assert rc == 0
+    decision = json.loads(out)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    reason = decision["permissionDecisionReason"]
+    assert probe_mod.REASON_LATE_BOUND in reason
+    # The refusal must not be dressed up as a grant finding.
+    assert "limited to SELECT-class grants" not in reason
+
+
+def test_hook_allows_the_same_lane_once_it_declares_its_resolver(tmp_path) -> None:
+    launcher = _write_launcher(tmp_path)
+    _write_mcp_json(tmp_path, _late_bound_block(launcher))
+    bindir = _fake_mysql_on_path(tmp_path, _RO_GRANTS)
+
+    rc, out, err = _fire_hook(
+        {"tool_name": "mcp__mysql__query", "tool_input": {"sql": "SELECT 1"}},
+        extra_env={
+            "CLAUDE_PROJECT_DIR": str(tmp_path),
+            "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
+        },
+    )
+    assert rc == 0, err
+    assert out.strip() == ""  # allowed — no deny envelope
+
+
+def test_cli_probe_all_passes_a_declared_multi_lane_project(tmp_path) -> None:
+    """The /qna + /recon spawn gate on a Secrets-Manager project: several
+    late-bound lanes, each declaring its own resolver, sweep clean."""
+    launcher = _write_launcher(tmp_path)
+    bindir = _fake_mysql_on_path(tmp_path, _RO_GRANTS)
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "mysql": _late_bound_block(launcher),
+                    "mysql-shop-prod": _late_bound_block(launcher),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    proc = _run_cli(
+        ["probe", "--project-root", str(tmp_path), "--all", "--no-cache"],
+        extra_env={"PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}"},
+    )
+
+    assert proc.returncode == EXIT_OK, proc.stderr
+    assert "[mysql]: ok" in proc.stdout
+    assert "[mysql-shop-prod]: ok" in proc.stdout

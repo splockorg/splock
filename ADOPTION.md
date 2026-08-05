@@ -132,9 +132,12 @@ MCP lane carries its own deterministic guard (VISION §4.1, §4.9):
   the result against a closed read allowlist (`USAGE`, `SELECT`,
   `SHOW VIEW`, `SHOW DATABASES`, `PROCESS`). A write-capable credential
   refuses with **exit 51**, naming the offending grants and the fix. A
-  configured-but-unverifiable setup (no client binary, unresolvable
-  credentials, connection failure) refuses with **exit 52** — a gate
-  that could not run is not a pass (VISION §4.7).
+  configured-but-unverifiable setup refuses with **exit 52** — a gate
+  that could not run is not a pass (VISION §4.7) — and names *which*
+  wall it hit (`late_bound`, `no_credentials`, `unattributed`,
+  `resolver_failed`, `no_client`, `probe_failed`, `bad_config`), because
+  the remedies are not the same and a generic "unverifiable" sends
+  operators to the wrong one.
 - **Per-call hook** — `hooks/mysql-mcp-guard.sh` (PreToolUse, matcher
   `mcp__mysql.*`) fires on every call to **any MCP server whose name
   begins with `mysql`**, from any agent: it denies write-shaped calls
@@ -157,12 +160,126 @@ MCP lane carries its own deterministic guard (VISION §4.1, §4.9):
   discipline: on by default; configuration turns it off. The fix for a
   refusal is the credential, not the knob.
 
-Credential resolution for the probe: the `mysql` server's `env` block
-(with `${VAR}` expansion) over the project `.env` over process env;
-recognized names `MYSQL_HOST/PORT/USER/PASSWORD` (plus common aliases
-`MYSQL_USERNAME`, `MYSQL_PASS`, `DB_USER`, `DB_PASSWORD`, …). The
-password travels via `MYSQL_PWD` in the probe's environment, never on
-its argv.
+Credential resolution for the probe, lowest precedence first: process
+env → the project `.env` → the server's own `env` block (with `${VAR}`
+expansion) → a declared **credential command** (below). Recognized names
+`MYSQL_HOST/PORT/USER/PASSWORD` (plus common aliases `MYSQL_USERNAME`,
+`MYSQL_PASS`, `DB_USER`, `DB_PASSWORD`, …). The password travels via
+`MYSQL_PWD` in the probe's environment, never on its argv.
+
+**The lane must name its own credential.** Each `mysql*` server block
+declares the user it connects as — directly, by `${VAR}` indirection, or
+through a credential command. A bare `MYSQL_USER` in `.env` or your
+shell is *not* enough on its own: nothing ties it to a particular lane,
+and a server whose launcher resolves its own credentials would be graded
+on a stranger's, possibly on another host. That case refuses with
+`exit 52 (unattributed)` rather than certifying the wrong subject.
+
+**Prerequisite:** the probe needs a `mysql` or `mariadb` client binary
+on the PATH the hook runs with. Your MCP server does not need one, so
+this is easy to miss — a host without it refuses every lane with
+`exit 52 (no_client)`.
+
+##### Late-bound credentials (Secrets Manager, Vault, `op run`)
+
+The tiers above assume the credential is **static and readable before
+launch**. A launcher that fetches the secret at spawn and exports it
+into the server process breaks that assumption completely: the server
+block often carries no `env` key at all, nothing is on disk, and no
+alias spelling helps — the names live in the secret store, not in your
+config. Such a lane is *late-bound*. Left undeclared it refuses forever
+(`exit 52 (late_bound)`), which is the guard, not the credential,
+blocking a correct setup.
+
+Declare how the lane resolves its credentials, in that server's own
+`env` block:
+
+```json
+{
+  "mcpServers": {
+    "mysql": {
+      "command": "bash",
+      "args": ["scripts/mcp/mysql_mcp.sh", "shop"],
+      "env": {
+        "SPLOCK_MYSQL_MCP_CREDENTIAL_COMMAND":
+          "bash scripts/mcp/mysql_mcp.sh shop --print-credentials"
+      }
+    }
+  }
+}
+```
+
+The guard runs that command (argv split without a shell, 15-second
+timeout, cwd = project root) and reads its **stdout** as `KEY=VALUE`
+lines, taking precedence over every other tier:
+
+```
+MYSQL_HOST=db.internal
+MYSQL_PORT=3306
+MYSQL_USER=mcp_ro
+MYSQL_PASSWORD=...
+```
+
+stdout is captured and never logged or echoed. Print only what the
+probe needs — anything omitted falls through to the tiers below, so a
+lane whose password already sits in `.env` need only print the user and
+host.
+
+**Point it at the launcher itself.** The strongest form gives the
+launcher a flag that prints the values it is about to export and exits
+before starting the server:
+
+```bash
+if [ "${2:-}" = "--print-credentials" ]; then
+  printf 'MYSQL_HOST=%s\nMYSQL_USER=%s\nMYSQL_PASSWORD=%s\n' \
+    "${MYSQL_HOST}" "${MYSQL_USER}" "${MYSQL_PASS}"
+  exit 0
+fi
+exec <your mysql MCP server>
+```
+
+One resolution path means the probe cannot drift from what the server
+actually connects with. A separate script that re-derives the same
+secret works too, and is exactly as trustworthy as its agreement with
+the launcher.
+
+Four rules keep this narrow:
+
+- **Declared per lane, in the server block only.** The key is never read
+  from `.env` or the ambient environment — a project-wide value would
+  grade every `mysql*` lane with one lane's credentials. Five lanes
+  means five declarations.
+- **It runs before the verdict cache.** A resolver that stops working
+  (expired SSO, unreachable secret store) refuses at once with
+  `exit 52 (resolver_failed)`; no earlier `ok` can stand in for it. A
+  rotation onto a different user re-probes immediately — the 15-minute
+  cache only ever covers a grant change on the same user.
+- **It buys no new privilege.** `.mcp.json` already names the command
+  Claude Code executes to *start* the server, with your privileges.
+  Treat that file as the operator-owned input it is; an agent that can
+  rewrite it can repoint the lane with or without this key.
+- **It is not a way through.** The resolver supplies an identity; the
+  verdict still comes from a live `SHOW GRANTS` against it. A
+  write-capable late-bound credential still refuses with exit 51.
+
+##### What the probe verifies — and what it does not
+
+- It verifies **the credential the lane declares**. With a credential
+  command that is the one the server uses, by construction. With a
+  static `env` block it is what you wrote there — accurate as long as
+  the launcher does not override it, which is your assertion to make and
+  the reason the declaration has to be per lane.
+- It never verifies **a credential it merely found**. An undeclared
+  lane refuses (`unattributed`) instead of grading whatever `MYSQL_USER`
+  happens to be in scope. Every verdict prints its subject —
+  `[user@host:port via <source>]` — so what was graded is on the record
+  and not inferred from the exit code.
+- It verifies **grants at probe time**. It does not watch the session
+  afterwards: layer 1, the statement filter, is what stands between a
+  cleared lane and a write-shaped call.
+- `SPLOCK_MYSQL_MCP_GUARD=warn` stays the blunt instrument — it accepts
+  unverified credentials on **every** lane at once, write-capable ones
+  included. It is not the remedy for a late-bound lane.
 
 Projects that configure no `mysql` server need to do nothing: the grant
 is inert and `/qna` runs exactly as before (§4.12 zero-config

@@ -53,3 +53,6 @@ settings.local.json
 # --- Slug-registry runtime residue (never tracked in this repo) ---
 docs/plans/**/*_orchestrator_log.jsonl
 docs/plans/**/*.lock
+
+# --- Ledger flock artifact (bin/route_issue --type outstanding) ---
+docs/outstanding_issues.md.lock

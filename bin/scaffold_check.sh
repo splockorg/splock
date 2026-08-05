@@ -79,8 +79,9 @@ assert_file "docs/plans/scheduled_markers/list.md"
 assert_file "docs/plans/scheduled_markers/prefix_registry.md"
 assert_file "docs/plans/scheduled_markers/closed_archive.md"
 
-# --- outstanding_issues.md at repo root ---
-assert_file "outstanding_issues.md"
+# --- the deferred-work ledger (doc-rooted: matches the sealed glob, the
+#     bin/route_issue writer, and the lazy-dump cap — see OI-6) ---
+assert_file "docs/outstanding_issues.md"
 
 # --- scaffold manifest ---
 assert_file "SCAFFOLD.md"

@@ -109,4 +109,4 @@ the tree. Enforced at zero by `tests/trace_grep.sh` — run it before committing
 | `docs/SPEC_v2.7.md` | Framework design specification |
 | `ADOPTION.md` | Config surface, `SPLOCK_*` env interface |
 | `docs/FLEET.md` | Multi-slug tracker, C&C, spawn/board/resume |
-| `docs/FOLLOW_ONS.md` · `outstanding_issues.md` | Named deferred scope · field bugs |
+| `docs/FOLLOW_ONS.md` · `docs/outstanding_issues.md` | Named deferred scope · field bugs (the ledger is sealed — append via `bin/route_issue --type outstanding`) |

@@ -60,20 +60,22 @@ def _verdict_exit(verdict, mode: str, server: str) -> int:
             file=sys.stderr,
         )
         return EXIT_WRITE_CAPABLE
-    # unverifiable
+    # unverifiable — `verdict.reason` names which wall was hit; the policy
+    # is the same for all of them (fail closed), the message is not.
+    tag = f", {verdict.reason}" if verdict.reason else ""
     if mode == "warn":
         print(
-            f"mysql-mcp-guard [{server}]: WARN (unverified) — {verdict.detail}",
+            f"mysql-mcp-guard [{server}]: WARN (unverified{tag}) — {verdict.detail}",
             file=sys.stderr,
         )
         return EXIT_OK
     print(
-        f"mysql-mcp-guard [{server}]: REFUSE (exit {EXIT_UNVERIFIABLE}) — "
+        f"mysql-mcp-guard [{server}]: REFUSE (exit {EXIT_UNVERIFIABLE}{tag}) — "
         f"{verdict.detail}\n"
-        "A gate that could not run is not a pass (VISION §4.7). "
-        "Verify the credential manually, then either make the probe runnable "
-        "(mysql client on PATH + resolvable creds) or set "
-        "SPLOCK_MYSQL_MCP_GUARD=warn to accept unverified.",
+        "A gate that could not run is not a pass (VISION §4.7). Make the lane "
+        "verifiable — the line above names what is missing. "
+        "SPLOCK_MYSQL_MCP_GUARD=warn accepts unverified credentials on EVERY "
+        "lane at once, including write-capable ones; it is not the fix.",
         file=sys.stderr,
     )
     return EXIT_UNVERIFIABLE

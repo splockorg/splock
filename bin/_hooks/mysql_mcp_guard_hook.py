@@ -10,7 +10,12 @@ layers, first-deny-wins:
 
   1. Statement filter — write-shaped tool name or SQL input → deny.
   2. Credential probe — SHOW GRANTS beyond the read allowlist → deny;
-     unverifiable → deny in halt mode (VISION §4.7 fail closed).
+     unverifiable → deny in halt mode (VISION §4.7 fail closed). A lane
+     whose launcher resolves credentials at spawn declares a credential
+     command so it is verifiable rather than permanently unverifiable
+     (ADOPTION.md "Late-bound credentials"); the refusal message names
+     which wall was hit (`verdict.reason`) instead of sending every
+     failure to the same grant-narrowing advice.
 
 ``SPLOCK_MYSQL_MCP_GUARD``: halt (default) denies; warn logs to stderr and
 allows; off skips both layers.
@@ -34,6 +39,14 @@ _FIX_HINT = (
     " Fix: narrow the mysql MCP server's DB user to SELECT/SHOW VIEW "
     "(see ADOPTION.md 'MySQL MCP for /qna and /recon'), or downgrade with "
     "SPLOCK_MYSQL_MCP_GUARD=warn (not recommended)."
+)
+
+# An `unverifiable` refusal is not a grant problem, so it must not carry the
+# grant advice: the credential may well be read-only and simply unreadable
+# from here. `verdict.detail` already names what is missing for this reason.
+_UNVERIFIABLE_TAIL = (
+    " A gate that could not run is not a pass (VISION §4.7) — this is a "
+    "refusal to certify, not a finding that the credential can write."
 )
 
 
@@ -102,17 +115,24 @@ def main() -> int:
     if verdict.status in ("inert", "ok"):
         _hook_log("ok", f"tool={tool_name} probe={verdict.status}")
         return 0
+    graded = verdict.status + (f"/{verdict.reason}" if verdict.reason else "")
     if mode == "warn":
-        _hook_log("warned", f"tool={tool_name} probe={verdict.status}")
+        _hook_log("warned", f"tool={tool_name} probe={graded}")
         print(f"mysql-mcp-guard WARN: {verdict.detail}", file=sys.stderr)
         return 0
-    _emit_deny(
-        f"mysql MCP call refused — {verdict.detail}."
-        + _FIX_HINT
-        + " The MySQL user must be limited to SELECT-class grants before "
-        "mysql MCP calls are allowed through."
-    )
-    _hook_log("blocked", f"tool={tool_name} probe={verdict.status}")
+    if verdict.status == "write_capable":
+        _emit_deny(
+            f"mysql MCP call refused — {verdict.detail}."
+            + _FIX_HINT
+            + " The MySQL user must be limited to SELECT-class grants before "
+            "mysql MCP calls are allowed through."
+        )
+    else:
+        _emit_deny(
+            f"mysql MCP call refused ({verdict.reason or 'unverifiable'}) — "
+            f"{verdict.detail}." + _UNVERIFIABLE_TAIL
+        )
+    _hook_log("blocked", f"tool={tool_name} probe={graded}")
     return 0
 
 

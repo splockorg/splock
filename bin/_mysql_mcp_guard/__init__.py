@@ -21,6 +21,15 @@ The credential itself remains the hard floor — a hook only runs where hooks
 are installed. The probe exists to make a write-capable credential a loud
 configuration error instead of a silent one.
 
+The probe's own precondition is that it can *find* the credential. A
+launcher that resolves secrets at spawn (Secrets Manager, Vault, ``op
+run``) leaves nothing on disk to find, and a gate whose default verdict on
+a correct setup is REFUSE trains everyone to reason past it. Such a lane
+declares its resolver — ``SPLOCK_MYSQL_MCP_CREDENTIAL_COMMAND`` in its own
+`.mcp.json` `env` block — and the probe runs it (`probe.py`, ADOPTION.md
+"Late-bound credentials"). Fail-closed is unchanged: the fix makes correct
+configurations verifiable, never unverifiable ones passable.
+
 Mode knob: ``SPLOCK_MYSQL_MCP_GUARD`` ∈ ``halt`` (default) / ``warn`` /
 ``off`` — §4.12 discipline: on by default, configuration turns it off.
 """

@@ -123,7 +123,7 @@ Open shape:
 three candidate shapes have materially different blast radii, so no task is
 writable today. Tracked in VISION §16.14.
 
-## OI-6 — splock's own outstanding ledger sits outside its own sealed inventory (2026-07-29)
+## OI-6 — splock's own outstanding ledger sits outside its own sealed inventory (2026-07-29) — ✅ FIXED 2026-08-05
 
 `hooks/sealed_paths.txt` seals the deferred-work ledger at
 **`docs/outstanding_issues.md`**, so in an adopter repo `bin/route_issue` is the
@@ -137,14 +137,7 @@ all written with a raw editor, which an adopter would have been refused for.
 Same family as the empty marker registry: **splock governs its adopters more
 strictly than it governs itself** (VISION §4.15).
 
-**Not fixed here, deliberately.** The fix is a one-line edit to
-`hooks/sealed_paths.txt` — and `hooks/**` is itself sealed (VISION §4.10: the
-agent may never edit splock's own plumbing, and the hooks that constrain an
-agent are exactly what it must not rewrite). An agent closing this issue by
-editing the seal list would be a live demonstration of why the seal exists. It
-needs an operator, or FO-1's sanctioned privileged path once that ships.
-
-**Candidate resolutions** (operator's call):
+**Candidate resolutions** (as filed):
 
 1. **Move the ledger** to `docs/outstanding_issues.md`, matching the sealed glob
    and the adopter convention. Cheapest, and makes splock's layout match what it
@@ -156,7 +149,23 @@ needs an operator, or FO-1's sanctioned privileged path once that ships.
    adopter's unrelated file of the same name — though per the inventory's own
    comment, over-sealing is the safe direction.
 
-Option 1 is the recommendation: one location, one convention, no special case.
+**FIXED 2026-08-05 by option 1 — the ledger moved to
+`docs/outstanding_issues.md`.** One location, one convention, no special case.
+Every other part of the machinery already pointed at the doc-rooted path: the
+sealed glob, `bin/_route_issue/outstanding.py`'s writer, and
+`hooks/lazy-dump-cap.sh`'s staged-diff check. Only the file was in the wrong
+place — so this repo's ledger was neither sealed *nor* cap-enforced, while
+`bin/route_issue` would have created a second, empty ledger beside it on first
+use. Raw edits are now denied at the `PreToolUse` boundary here exactly as in
+an adopter, and appends go through `bin/route_issue --type outstanding`.
+References repointed: `AGENTS.md`, `docs/IMPLEMENTATION_STATUS.md` (three rows),
+`bin/scaffold_check.sh`.
+
+**Correction to this entry's own claim** (VISION §4.14 class): the original text
+said the fix "needs an operator" because `hooks/**` is sealed. That was true of
+options 2 and 3 and false of option 1, which was the recommendation — moving the
+file touches no sealed path. The un-fixability was overstated, and it is the
+reason this sat for a week.
 
 **Related:** the same "shipped for adopters, unused here" pattern covers the
 empty `docs/plans/scheduled_markers/list.md` and `prefix_registry.md` — tracked
@@ -173,3 +182,15 @@ input-sanitization boundary. `VISION.md` §5 carried the same error.
 **Both corrected 2026-07-29.** The README stage table now ends at `/eli5` and
 carries a separate table for the two non-stage mechanisms (`bin/wrap`,
 `bin/fleet close`), stated as unrelated to each other. `VISION.md` §5 matches.
+- [2026-08-05T23:45:27Z] [splock] [] [bin/route_issue:outstanding] mysql-mcp-guard trusts .mcp.json, which no sealed glob covers — an agent can repoint a lane's credentials or its declared credential command mid-session
+  - context: bin/_mysql_mcp_guard/probe.py + hooks/sealed_paths.txt (fix is one line in the seal list; hooks/** is agent-sealed, so it needs an operator)
+  - line_id: oi_2026-08-05T23:45:27Z_2328
+  - status: open
+- [2026-08-05T23:45:27Z] [splock] [] [bin/route_issue:outstanding] mysql-mcp-guard probe needs a mysql/mariadb client binary; a Python-only host refuses every lane with no_client even when the credential is read-only
+  - context: bin/_mysql_mcp_guard/probe.py shutil.which branch — fix is an optional adopter-driver (pymysql) transport, deferred to keep a second grants-parsing path out of a security gate
+  - line_id: oi_2026-08-05T23:45:27Z_566b
+  - status: open
+- [2026-08-05T23:46:43Z] [splock] [] [bin/route_issue:outstanding] splock does not enable its own plugin in its own checkout, so none of its hooks constrain agents working here — the seal inventory is inventory-only in this repo (§4.15 root of the OI-6 family)
+  - context: .claude/settings.local.json has no splock@splock entry; adopters carry it. Found while closing OI-6
+  - line_id: oi_2026-08-05T23:46:43Z_98ed
+  - status: open
