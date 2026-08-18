@@ -10,6 +10,7 @@ parents[2] derivation.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -83,3 +84,57 @@ def test_create_flag_still_honoured(monkeypatch, tmp_path):
     assert not ghost.exists()
     assert _env_paths.project_root(create=True) == ghost.resolve()
     assert ghost.is_dir()
+
+
+# --- load_env_file() default resolution -------------------------------------
+#
+# Regression cover for the 0.3.7 fix: the default was plugin_root()/.env, i.e.
+# the plugin's own install directory. Under an installed plugin no adopter .env
+# is ever read, so SPLOCK_DB_* never reach the process, the MySQL intent backend
+# raises MySQLUnavailable, every call site catches it and falls back to a local
+# JSONL row -- and the framework reports success while the agent_sessions mirror
+# silently stops filling. The failure is invisible, so it needs a real guard.
+
+
+def test_load_env_file_defaults_to_the_project_root(monkeypatch, tmp_path):
+    project = tmp_path / "adopter"
+    project.mkdir()
+    (project / ".env").write_text("SPLOCK_TEST_REAL=from-project\n", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+    monkeypatch.delenv("SPLOCK_TEST_REAL", raising=False)
+    try:
+        _env_paths.load_env_file()
+        assert os.environ.get("SPLOCK_TEST_REAL") == "from-project"
+    finally:
+        os.environ.pop("SPLOCK_TEST_REAL", None)
+
+
+def test_load_env_file_ignores_the_plugin_install_dir(monkeypatch, tmp_path):
+    # The exact 0.3.6 bug: a .env sitting in the plugin install dir must never
+    # be preferred over -- or read instead of -- the adopter's.
+    plugin = tmp_path / "plugin-install"
+    plugin.mkdir()
+    (plugin / ".env").write_text("SPLOCK_TEST_DECOY=from-plugin-dir\n", encoding="utf-8")
+    project = tmp_path / "adopter"
+    project.mkdir()
+    (project / ".env").write_text("SPLOCK_TEST_REAL=from-project\n", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_PLUGIN_ROOT", str(plugin))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+    for key in ("SPLOCK_TEST_DECOY", "SPLOCK_TEST_REAL"):
+        monkeypatch.delenv(key, raising=False)
+    try:
+        _env_paths.load_env_file()
+        assert os.environ.get("SPLOCK_TEST_REAL") == "from-project"
+        assert "SPLOCK_TEST_DECOY" not in os.environ
+    finally:
+        for key in ("SPLOCK_TEST_DECOY", "SPLOCK_TEST_REAL"):
+            os.environ.pop(key, None)
+
+
+def test_intent_entry_points_use_the_default_resolution():
+    # Both hardcoded Path(__file__)...parents[3]/.env, which is the plugin tree
+    # and therefore defeats the fix above regardless of what the default does.
+    for rel in ("bin/_intent/hook_writer.py", "bin/_intent/backfill_from_jsonl.py"):
+        src = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        assert "load_env_file()" in src, f"{rel}: must call load_env_file() with no argument"
+        assert "load_env_file(Path(" not in src, f"{rel}: still hardcodes a __file__-derived .env"

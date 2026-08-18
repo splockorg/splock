@@ -27,7 +27,7 @@ from pathlib import Path
 
 from bin._env_paths import load_env_file
 
-load_env_file(Path(__file__).resolve().parent.parent.parent / ".env")
+load_env_file()
 
 from . import db as _db  # noqa: E402
 from . import hook_writer  # noqa: E402

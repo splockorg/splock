@@ -160,11 +160,18 @@ def load_env_file(path: Path | None = None) -> None:
     quotes). Either way existing environment variables are never overwritten,
     matching ``dotenv.load_dotenv`` defaults.
 
-    ``path`` defaults to ``plugin_root()/.env`` — the same repo-root ``.env``
-    all callers previously resolved by hand.
+    ``path`` defaults to ``project_root()/.env`` — the ADOPTER's repo root.
+    It must NOT be ``plugin_root()``: under an installed plugin that is the
+    read-only, update-ephemeral install dir, which holds no adopter ``.env``.
+    Pointed there, every ``SPLOCK_*`` value silently failed to load, so the
+    MySQL intent backend raised ``MySQLUnavailable``, every call site caught it
+    and fell back to a local JSONL row, and the framework reported success while
+    the ``agent_sessions`` mirror quietly stopped filling. In sideloaded /
+    in-tree mode both helpers resolve to the same derived root, so this is
+    byte-identical there.
     """
     if path is None:
-        path = plugin_root() / ".env"
+        path = project_root() / ".env"
     try:
         from dotenv import load_dotenv
     except ModuleNotFoundError:
