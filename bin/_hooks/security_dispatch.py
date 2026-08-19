@@ -7,11 +7,15 @@ or empty) is echoed verbatim to our stdout; we exit 0 in all cases.
 
 Sub-hook dispatch table (per implplan §G.impl.10):
 
-    Order  Sub-hook                                  Trigger
-    1      .claude/hooks/sealed-paths.sh             tool ∈ {Edit, Write, Read}
-    2      .claude/hooks/package-safety.sh           tool = Bash AND install pattern
-    3      .claude/hooks/safe-ddl.sh                 tool = Bash AND DDL pattern
-    4      .claude/hooks/guardrail-spawn.sh          tool = Task (if installed)
+    Order  Sub-hook                          Trigger
+    1      sealed-paths.sh                   tool ∈ {Edit, Write, Read}
+    2      package-safety.sh                 tool = Bash AND install pattern
+    3      safe-ddl.sh                       tool = Bash AND DDL pattern
+    4      guardrail-spawn.sh                tool = Task (if installed)
+
+Scripts are resolved through :func:`bin._hooks.hooks_dir`, never a
+hardcoded layout: this fork ships them at the top-level ``hooks/`` and an
+installed plugin has no ``.claude/hooks/`` at all.
 
 If a sub-hook emits stdout (deny envelope) we propagate it and stop;
 later sub-hooks are NOT invoked. If a sub-hook is missing on disk we
@@ -25,6 +29,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from bin._hooks import hooks_dir as _hooks_dir
 from bin._hooks.pattern_detect import is_install_command, scan_ddl_command
 
 
@@ -98,7 +103,7 @@ def main() -> int:
     if isinstance(tool_input, dict):
         command = tool_input.get("command", "") or ""
 
-    hooks_dir = REPO_ROOT / ".claude" / "hooks"
+    hooks_dir = _hooks_dir()
     dispatch_log: list[str] = []
 
     # 1. sealed-paths.sh (Edit / Write / Read).

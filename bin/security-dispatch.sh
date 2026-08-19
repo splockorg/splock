@@ -10,7 +10,10 @@
 #   1. sealed-paths.sh                — tool ∈ {Edit, Write, Read}
 #   2. package-safety.sh              — tool = Bash AND install-command shape
 #   3. safe-ddl.sh                    — tool = Bash AND DDL-command shape
-#   4. .claude/hooks/guardrail-spawn.sh — tool = Task (if installed)
+#   4. guardrail-spawn.sh             — tool = Task (if installed)
+#
+# Sub-hook scripts are resolved via bin._hooks.hooks_dir(), never a
+# hardcoded layout — this fork ships them at top-level hooks/.
 #
 # State/behavioral hooks NOT under dispatch (own settings.json entries):
 #   - splock-session-start  (SessionStart)
