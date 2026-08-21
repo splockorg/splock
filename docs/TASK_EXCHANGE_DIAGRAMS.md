@@ -18,21 +18,21 @@ an operator's own boundary, on that operator's own account.
 flowchart LR
     subgraph OPA["Operator A — own machine, own account"]
         A_FLEET["bin/fleet<br/>board / spawn"]
-        A_CRON["exchange cron<br/>publish + heartbeat"]
+        A_CRON["exchange cron<br/>publish + heartbeat<br/>+ quota read"]
         A_CC["claude -p<br/>subscription A"]
         A_FLEET --> A_CRON
         A_FLEET --> A_CC
     end
 
     subgraph OPB["Operator B — own machine, own account"]
-        B_CRON["exchange cron<br/>match + claim + sweep"]
+        B_CRON["exchange cron<br/>match + claim + sweep<br/>+ quota read"]
         B_POL["local policy<br/>opt-in, caps, deny-list"]
         B_CC["claude -p<br/>subscription B"]
         B_CRON --> B_POL --> B_CC
     end
 
     subgraph OPC["Operator C — own machine, own account"]
-        C_CRON["exchange cron"]
+        C_CRON["exchange cron<br/>+ quota read"]
         C_CC["claude -p<br/>subscription C"]
         C_CRON --> C_CC
     end
@@ -50,9 +50,12 @@ flowchart LR
     GIT -->|"PR for review"| A_FLEET
 
     ANT["Anthropic"]
-    A_CC -->|"OAuth A"| ANT
-    B_CC -->|"OAuth B"| ANT
-    C_CC -->|"OAuth C"| ANT
+    A_CC -->|"OAuth A · model calls"| ANT
+    B_CC -->|"OAuth B · model calls"| ANT
+    C_CC -->|"OAuth C · model calls"| ANT
+    A_CRON -.->|"OAuth A · quota only"| ANT
+    B_CRON -.->|"OAuth B · quota only"| ANT
+    C_CRON -.->|"OAuth C · quota only"| ANT
 
     classDef nocred fill:#eef7ee,stroke:#3a7,stroke-width:2px
     classDef vendor fill:#f5f0ff,stroke:#85f,stroke-width:1px
@@ -60,9 +63,12 @@ flowchart LR
     class ANT vendor
 ```
 
-The three arrows into Anthropic never cross an operator boundary. That is the
-whole compliance argument in one picture: **N humans, N accounts, N machines,
-each spending only their own pool on work their own policy accepted.**
+No arrow into Anthropic crosses an operator boundary. Solid arrows are model
+calls; dotted arrows are the free quota read each cron makes against its **own**
+`~/.claude/.credentials.json`, which is how headroom reaches the table without a
+credential ever leaving its machine. That is the whole compliance argument in one
+picture: **N humans, N accounts, N machines, each spending only their own pool on
+work their own policy accepted — and only numbers crossing between them.**
 
 ---
 
@@ -88,7 +94,11 @@ erDiagram
         json    models     "entitlement — what this account can spawn"
         json    stages     "local policy — what this human permits"
         json    repos      "which checkouts exist here"
-        int     headroom_bucket "quantised estimate"
+        json    limits     "limits[] from the OAuth usage endpoint"
+        int     headroom_pct "vendor-computed, not estimated"
+        string  headroom_severity "normal, warning, critical"
+        string  headroom_resets_at
+        string  headroom_source "endpoint or ledger-fallback"
         string  headroom_as_of
         int     max_concurrent
         int     borrowed_today
@@ -168,7 +178,7 @@ stateDiagram-v2
     executing --> rate_limited : worker hit its own window
     executing --> refused : local policy blocked the stage
 
-    rate_limited --> open : headroom band lowered, attempt+1
+    rate_limited --> open : fresh quota read forced, attempt+1
     refused --> open : that worker filtered out, attempt+1
 
     open --> failed : attempt exceeds max_attempts
@@ -202,6 +212,7 @@ sequenceDiagram
     participant BC as B · matcher cron
     participant BP as B · local policy
     participant BX as B · claude -p
+    participant ANT as Anthropic
     participant G as git remote
 
     A->>AF: /code on a stalled slug
@@ -210,8 +221,10 @@ sequenceDiagram
     AF->>DB: INSERT offer (stage, required_model, base_ref, directive)
     Note over DB: state = open · zero tokens spent
 
-    loop every worker, every minute
-        BC->>DB: UPDATE heartbeat + headroom_bucket (from local ledger)
+    loop every worker, every heartbeat interval
+        BC->>ANT: GET /api/oauth/usage — own OAuth token, zero model tokens
+        ANT-->>BC: limits[] — percent, severity, resets_at, scoped model
+        BC->>DB: UPDATE heartbeat + headroom numbers (never the token)
     end
 
     BC->>DB: SELECT open offers + eligible workers
@@ -256,7 +269,7 @@ flowchart TD
     OFFERS --> LOOP{"next offer"}
     LOOP -->|"none"| SWEEP
 
-    LOOP -->|"offer"| F1{"worker has<br/>required_model?"}
+    LOOP -->|"offer"| F1{"worker has required_model<br/>and it is not at 100%?<br/>from the same limits[] read"}
     F1 -->|no| DROP["filtered out"]
     F1 -->|yes| F2{"worker has repo<br/>+ base_ref reachable?"}
     F2 -->|no| DROP
@@ -270,7 +283,7 @@ flowchart TD
     F6 -->|no| DROP
     F6 -->|yes| POOL["eligible pool"]
 
-    POOL --> S1["sort 1 — headroom bucket DESC<br/>quantised, never raw"]
+    POOL --> S1["sort 1 — headroom DESC<br/>narrowest binding limit:<br/>weekly_scoped for required_model,<br/>else weekly_all, else session"]
     S1 --> S2["sort 2 — fairness debt DESC<br/>lent minus borrowed"]
     S2 --> S3["sort 3 — concurrency headroom DESC"]
     S3 --> S4["sort 4 — blake2b of offer_id+worker_id ASC<br/>fixed hash, no salt, no clock"]

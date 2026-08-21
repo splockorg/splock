@@ -82,8 +82,10 @@ table family on that same connection, not a new piece of infrastructure.
 
 Heartbeated by each operator's cron. Carries **capability** (which models this
 account can actually spawn, which stages this operator permits, which repos this
-machine has) and **capacity** (a headroom estimate and its `as_of`). Never
-carries a token.
+machine has) and **capacity** — the `limits[]` rows read from the OAuth usage
+endpoint (`percent`, `severity`, `resets_at`, and the scoped model name), with
+the `as_of` of that read. Never carries a token: the worker reads its own
+credential locally and publishes only the numbers.
 
 ### `exchange_offers` — what needs doing
 
@@ -143,9 +145,11 @@ reads inside the comparison:
    `required_model`, lacks the repo, has the stage disabled in local policy, is
    outside the offer's `visibility`, or has a stale heartbeat is removed. It
    cannot be outweighed by a good score elsewhere.
-2. **Headroom bucket** (descending) — a coarse quantised band, not a raw number.
-   Buckets, because raw estimates are noisy and near-ties would otherwise flap
-   between matcher runs.
+2. **Headroom** (descending) — the vendor-computed `percent` for the binding
+   limit, inverted. The narrowest applicable row wins: a `weekly_scoped` row for
+   the offer's `required_model` if one exists, else `weekly_all`, else
+   `session`. No local quantisation — the number is an integer the vendor
+   computed, identical for every matcher that reads the same row.
 3. **Fairness debt** (descending) — offers executed *for others* minus offers
    executed *by others for you*, over a rolling window. This is what stops the
    one teammate on the biggest plan from silently becoming the team's build
@@ -165,28 +169,76 @@ state='open'` with an affected-rows check. Exactly one succeeds. The determinism
 above is what makes the *outcome* explainable; the unique key is what makes it
 *correct* even if determinism is later broken by a bug.
 
-## Invariant 3 — capability and capacity are declared, not probed
+## Invariant 3 — headroom is read locally, never guessed and never proxied
 
-There is no scriptable read of remaining subscription quota. `claude --help`
-exposes no `usage` subcommand (verified 2026-08-21, and `/usage` is interactive
-only), so a worker cannot ask Anthropic how much pool it has left without
-spending pool to do it — which would violate Invariant 1.
+Anthropic exposes an OAuth-authenticated quota endpoint that costs **zero model
+tokens** — it reports quota, it does not talk to a model:
 
-Headroom is therefore **estimated locally, for free**, from material already on
-disk:
+```
+GET https://api.anthropic.com/api/oauth/usage
+Authorization: Bearer <accessToken from ~/.claude/.credentials.json>
+anthropic-beta: oauth-2025-04-20
+User-Agent: claude-code/<installed CLI version>
+```
 
-- the per-slug runs ledger (`docs/plans/<slug>/_fleet_runs.jsonl`) and the
-  `total_cost_usd` the board already folds — a pool-draw meter, not billing;
-- observed rate-limit halts and `permission_denials` from prior children;
-- the operator's declared plan class and window boundaries;
-- the operator's own configured ceiling.
+Verified live 2026-08-21. The payload's `limits[]` array is exactly the routing
+input this design needs, already structured:
 
-Every headroom row therefore carries `as_of` and `confidence`, and the matcher
-quantises it into buckets precisely because it is an estimate. **Resolving how
-accurate this can actually be made is the first spike** — if headroom is
-unknowable to within a useful band, the feature degrades to entitlement routing
-only (route on "who has Fable", ignore "who has room"), which is still most of
-the value in the motivating case.
+```json
+{"kind": "session",       "percent": 9,   "severity": "normal",   "resets_at": "…"}
+{"kind": "weekly_all",    "percent": 86,  "severity": "warning",  "resets_at": "…"}
+{"kind": "weekly_scoped", "percent": 100, "severity": "critical", "resets_at": "…",
+ "scope": {"model": {"display_name": "Fable"}}}
+```
+
+Three consequences, all of which make the design simpler than a headroom
+estimate would have:
+
+1. **Entitlement and capacity are one read, not two.** A `weekly_scoped` row
+   names the model and its utilisation together — "does this account have Fable"
+   and "how much Fable is left" arrive in the same field. The eligibility filter
+   and the capacity sort read the same source.
+2. **The sort key needs no quantisation.** `percent` is already an integer and
+   `severity` is already a three-level band, so the matcher sorts on a value the
+   vendor computed rather than one each worker guessed. Determinism gets *easier*
+   — there is no estimator whose drift could make two workers disagree.
+3. **`resets_at` makes waiting a comparable option.** The matcher can weigh
+   "A recovers in 20 minutes" against "hand it to B now", which a
+   utilisation-only view cannot express.
+
+**Each worker reads its own token, locally, and publishes only the numbers.**
+The `accessToken` is read from that machine's own `~/.claude/.credentials.json`
+and sent only to the endpoint that issued it. It never enters an offer, a claim,
+or the exchange tables — what lands in `exchange_workers` is
+`{percent, severity, resets_at, model}`, which is not a credential. This is the
+same boundary Invariant 1 and the compliance section draw, applied to the
+telemetry path: **numbers cross the machine boundary, credentials never do.**
+
+**The endpoint is unofficial and undocumented**, and the design must treat it as
+such. It is absent from Anthropic's published API reference; the payload shape
+drifts (the live response carries a dozen codename keys — `nimbus_quill`,
+`tangelo`, `iguana_necktie`, `cinder_cove`, `amber_ladder` — most of them null,
+which is why a consumer must walk `limits[]` rather than hardcode key names); it
+rate-limits with 429s of its own; and it buckets unrecognised clients more
+aggressively, so a caller must identify honestly as the installed CLI version.
+Requirements that follow:
+
+- **Poll it on a schedule, not per decision.** The heartbeat cron reads it once
+  per interval and writes the result; the matcher reads the table, never the
+  endpoint. One read per worker per interval, regardless of how many offers are
+  in flight.
+- **Degrade, do not fail.** A 429, a 401, a schema change, or a missing
+  credentials file must leave the worker eligible-but-stale rather than crash
+  the cron — the row keeps its `as_of`, and a heartbeat too old to trust drops
+  the worker from eligibility exactly as a dead worker does.
+- **Keep the local-ledger estimator as the fallback path**, not the primary one.
+  `_fleet_runs.jsonl` and observed rate-limit halts still work when the endpoint
+  does not, at lower fidelity.
+
+Prior versions of this document asserted that no scriptable quota read existed
+and designed an estimator around that. That was wrong — the CLI has no `usage`
+subcommand, which is true and was over-generalised into a claim about the whole
+platform. The estimator survives only as the degradation path above.
 
 ## Invariant 4 — the transport is git, never a working tree
 
@@ -230,7 +282,7 @@ different *person*, not a different process owned by the same person. Concretely
 | Existing piece | Role in the exchange |
 |---|---|
 | `bin/_fleet/spawn.py` | The executor. A claimed offer becomes a normal headless `claude -p "/splock:<stage> <slug>"` child on the winning worker. No new transport. |
-| `bin/_fleet/runs.py` / `board.py` | The telemetry the headroom estimate reads, and the natural place to render borrowed/lent work. |
+| `bin/_fleet/runs.py` / `board.py` | The fallback headroom signal when the usage endpoint is unavailable, and the natural place to render borrowed/lent work. |
 | `_fleet_meta.json` profiles + `max_concurrent` | Already the local capacity + policy surface; the exchange reads it rather than inventing a second one. |
 | `bin/_intent/db.py` | The DAL, the SQLite/MySQL split, and the atomicity contract. The exchange is new tables, not a new database layer. |
 | `mysql-mcp-guard` | Already gates the MySQL MCP lane read-only; the exchange's writes go through `bin/` code paths, not the agent's MCP lane. |
@@ -257,9 +309,15 @@ untouched.
   heartbeat.
 - **Clock skew between operators.** All timestamps are DB-server time, taken from
   a single `NOW()` per matcher transaction. Machine clocks are never compared.
-- **The estimate is wrong.** A worker that accepts and then immediately hits its
-  limit returns `rate_limited`, which lowers its own headroom band and requeues
-  the offer. The system self-corrects without a human tuning anything.
+- **The headroom read is stale.** Utilisation moves between heartbeats, so a
+  worker can accept and then immediately hit its limit. It returns
+  `rate_limited`, which forces a fresh endpoint read and requeues the offer. The
+  system self-corrects without a human tuning anything — and the shorter the
+  heartbeat interval, the narrower this window, which is what makes poll cadence
+  a real design parameter rather than a preference.
+- **The usage endpoint changes or goes away.** It is unofficial. The worker falls
+  back to the local-ledger estimate, marks its headroom `degraded`, and the
+  matcher weights it below any worker with a live read.
 - **One person becomes the team's server.** This is the fairness-debt key, and it
   is a hard cap, not just a sort term: a per-operator daily ceiling on borrowed
   execution, refused at filter time.
@@ -313,6 +371,7 @@ them structurally rather than by policy:
 | Rule | How the design satisfies it |
 |---|---|
 | No sharing credentials | No credential field exists in any table. There is nowhere to put one. |
+| No sharing credentials — telemetry path | Each worker reads its own OAuth token from its own machine and sends it only to the endpoint that issued it. What crosses the machine boundary is `{percent, severity, resets_at, model}` — numbers, not a credential. |
 | No making your Account available to others | Each operator's Claude Code runs only on their own machine, under their own login, executing work their own policy accepted. |
 | No routing requests through Pro/Max credentials on behalf of users | There is no proxy and no central executor. The central component is a table of text; it never holds a token and never makes a model call. |
 | No reselling | No money, no capacity market, no external users. |
@@ -398,9 +457,11 @@ exactly this question.
 
 ## Open decisions to resolve in `/plan`
 
-1. **Is headroom knowable?** The first spike, and the one that determines whether
-   the matcher routes on capacity or only on entitlement. Everything else in the
-   design survives either answer.
+1. **How much weight can an unofficial endpoint carry?** Headroom is readable
+   (Invariant 3), so the open question is dependability, not feasibility: how
+   often does the payload shape drift, what is the endpoint's own rate limit,
+   and does identifying as the installed CLI stay acceptable? Decide how much of
+   the matcher may depend on it and what the degraded mode routes on.
 2. **Team-only, or org-federated?** Recommend team-only for v1 — it keeps the
    compliance story simple and matches the motivating five-person case.
 3. **Does the subscription-only policy admit the API-key worker?** splock forbids
@@ -422,8 +483,9 @@ exactly this question.
 ## Next step
 
 Mint the slug and run `/plan task_exchange` scoped by this document, with
-Open decision 1 as the Phase 0 spike. If the spike says headroom is unknowable,
-the plan narrows to entitlement routing and stays worth building.
+Open decision 1 as the Phase 0 spike — a dependability soak on the usage
+endpoint rather than a feasibility question. If it proves too unstable to sort
+on, the plan falls back to the local-ledger estimate and stays worth building.
 
 ## Internal references
 
