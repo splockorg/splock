@@ -189,6 +189,8 @@ built-in default at the call site.
 | [CREDITS](CREDITS) | Prior art and influences. |
 | [docs/CLI_VERSION.md](docs/CLI_VERSION.md) | Minimum CLI version + CI pinning. |
 | [docs/PLUGIN_ENV_CONTRACT.md](docs/PLUGIN_ENV_CONTRACT.md) | `${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PLUGIN_DATA}` resolution contract. |
+| [docs/MULTI_ROUTING_ROADMAP.md](docs/MULTI_ROUTING_ROADMAP.md) | **Concept.** Routing splock's roles across Claude / OpenAI / Gemini. Research complete, unimplemented. |
+| [docs/TASK_EXCHANGE.md](docs/TASK_EXCHANGE.md) | **Concept.** Cross-operator stage pickup — route a stalled stage to a teammate with the model or the headroom. Includes the compliance boundary. Diagrams in [docs/TASK_EXCHANGE_DIAGRAMS.md](docs/TASK_EXCHANGE_DIAGRAMS.md). |
 
 ---
 

@@ -264,6 +264,19 @@ phase-number mapping above — this roadmap's P1 is the prior docs' "Phase 0."
 
 ---
 
+## Related track: task exchange (separate, deferred)
+
+Routing across *vendors* and routing across *teammates* answer the same
+question — "this stage needs a capability I do not have right now."
+`docs/TASK_EXCHANGE.md` is the second answer: publish a stalled stage to a
+table the team shares, let a teammate whose own account has the model (or the
+headroom) pick it up deterministically via cron, and hand the result back as a
+git ref. It reuses fleet's spawner untouched and the intent registry's DAL, so
+it is much the smaller build; its hard part is the compliance boundary
+(route the task, never the credential), which that doc states with the
+clauses quoted. The two compose: an exchange worker may itself be routing
+its coder to Codex. Neither is a prerequisite for the other.
+
 ## Related track: agent teams (separate, deferred)
 
 Inter-agent communication is its own investigation
